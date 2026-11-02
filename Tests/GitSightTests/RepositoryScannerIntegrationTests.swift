@@ -114,4 +114,26 @@ enum RepositoryScannerIntegrationTests {
             "each worktree of a bare repository reports its own uncommitted files"
         )
     }
+
+    static func testScanInspectsMoreRepositoriesThanCores() async throws {
+        let rootURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent(".build/GitSightTests/\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        // More repositories than parallel inspections, so finished slots must be refilled.
+        let count = ProcessInfo.processInfo.activeProcessorCount + 3
+        for number in 0..<count {
+            let url = rootURL.appendingPathComponent("repository-\(number)")
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+            try runGit(in: url, ["init", "-b", "main"])
+        }
+
+        var updates: [RepositoryScanProgress] = []
+        let result = try await RepositoryScanner().scan(under: rootURL) { updates.append($0) }
+        try expectEqual(result.repositories.count, count, "every repository is inspected")
+        try expectEqual(updates.last?.processedRepositories, count, "progress counts every inspected repository")
+        try expectEqual(updates.last?.fractionCompleted, 1, "progress finishes")
+    }
 }

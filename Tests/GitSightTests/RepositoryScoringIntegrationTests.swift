@@ -126,6 +126,11 @@ enum RepositoryScoringIntegrationTests {
         try "draft\n".write(to: draftURL, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -4 * 24 * 60 * 60)], ofItemAtPath: draftURL.path)
         try expectEqual(try inspector.inspect(repositoryAt: repositoryURL).severity, .warning, "old uncommitted files are abandoned with or without a remote")
+
+        try FileManager.default.removeItem(at: draftURL)
+        try "stashed\n".write(to: repositoryURL.appendingPathComponent("local.txt"), atomically: true, encoding: .utf8)
+        try runGit(in: repositoryURL, ["stash", "push", "-m", "old work"], environment: gitDate(daysAgo: 2))
+        try expectEqual(try inspector.inspect(repositoryAt: repositoryURL).severity, .warning, "an old stash is abandoned with or without a remote")
     }
 
     private static func commit(_ file: String, on branch: String?, in repositoryURL: URL, environment: [String: String] = [:]) throws {

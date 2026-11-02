@@ -114,7 +114,8 @@ enum RepositoryInspectorIntegrationTests {
             ("worktrees matter only for work they hold", RepositoryScoringIntegrationTests.testWorktreesMatterOnlyForWorkTheyHold),
             ("repository without remote is flagged once", RepositoryScoringIntegrationTests.testRepositoryWithoutRemoteIsFlaggedOnce),
             ("branch deleted on the server is a notice", RepositoryScoringIntegrationTests.testBranchDeletedOnServerIsANotice),
-            ("bare repository with worktrees is one repository", RepositoryScannerIntegrationTests.testBareRepositoryWithWorktreesIsOneRepository)
+            ("bare repository with worktrees is one repository", RepositoryScannerIntegrationTests.testBareRepositoryWithWorktreesIsOneRepository),
+            ("scan inspects more repositories than cores", RepositoryScannerIntegrationTests.testScanInspectsMoreRepositoriesThanCores)
         ] {
             await run(name: name, test, failures: &failures)
         }
