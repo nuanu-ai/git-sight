@@ -63,6 +63,11 @@ enum RepositoryInspectorIntegrationTests {
             failures: &failures
         )
         run(
+            name: "history limit keeps every local branch tip",
+            CommitTopologyIntegrationTests.testHistoryLimitKeepsEveryLocalBranchTip,
+            failures: &failures
+        )
+        run(
             name: "inspector reports files changed by selected commit",
             ChangedFilesIntegrationTests.testReportsFilesChangedBySelectedCommit,
             failures: &failures

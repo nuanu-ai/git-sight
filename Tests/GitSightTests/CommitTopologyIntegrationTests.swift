@@ -82,4 +82,30 @@ enum CommitTopologyIntegrationTests {
         try expectEqual(snapshot.currentBranch, "main", "fixture is viewed from the main branch")
         try expectEqual(snapshot.commits.contains { $0.subject == "Side branch only" }, true, "graph includes work that exists only on another branch")
     }
+
+    static func testHistoryLimitKeepsEveryLocalBranchTip() throws {
+        let repositoryURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent(".build/GitSightTests/\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: repositoryURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: repositoryURL) }
+        try runGit(in: repositoryURL, ["init", "-b", "main"])
+        try runGit(in: repositoryURL, ["config", "user.name", "Test User"])
+        try runGit(in: repositoryURL, ["config", "user.email", "test@example.com"])
+        try "initial\n".write(to: repositoryURL.appendingPathComponent("tracked.txt"), atomically: true, encoding: .utf8)
+        try runGit(in: repositoryURL, ["add", "tracked.txt"])
+        try runGit(in: repositoryURL, ["commit", "-m", "Branch root"])
+        try runGit(in: repositoryURL, ["branch", "side"])
+        for index in 1...100 {
+            try "\(index)\n".write(to: repositoryURL.appendingPathComponent("tracked.txt"), atomically: true, encoding: .utf8)
+            try runGit(in: repositoryURL, ["add", "tracked.txt"])
+            try runGit(in: repositoryURL, ["commit", "-m", "Main \(index)"])
+        }
+
+        let snapshot = try RepositoryInspector().inspect(repositoryAt: repositoryURL)
+        let sideTip = snapshot.commits.first { $0.refs.contains("side") }
+        try expectEqual(sideTip?.subject, "Branch root", "recent-history limit cannot evict a local branch tip")
+    }
 }
