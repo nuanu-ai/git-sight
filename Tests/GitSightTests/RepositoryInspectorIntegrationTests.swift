@@ -46,6 +46,11 @@ enum RepositoryInspectorIntegrationTests {
             CommitTopologyIntegrationTests.testMergeCommitHasStableParentEdgesAndDistinctRails,
             failures: &failures
         )
+        run(
+            name: "inspector reports files changed by selected commit",
+            ChangedFilesIntegrationTests.testReportsFilesChangedBySelectedCommit,
+            failures: &failures
+        )
         if failures > 0 { exit(1) }
     }
 

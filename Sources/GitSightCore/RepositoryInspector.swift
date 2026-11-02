@@ -40,6 +40,10 @@ public struct RepositoryInspector {
         )
     }
 
+    public func changedFiles(in repositoryURL: URL, commit: CommitSnapshot) throws -> [CommitFileSnapshot] {
+        []
+    }
+
     private func dirtyFiles(in repositoryURL: URL) throws -> Int {
         let result = try git.run(in: repositoryURL, [
             "status", "--porcelain=v1", "--untracked-files=normal", "-z"
