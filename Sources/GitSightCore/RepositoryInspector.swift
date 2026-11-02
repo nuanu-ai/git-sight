@@ -74,7 +74,7 @@ public struct RepositoryInspector {
 
     private func dirtyFiles(in repositoryURL: URL) throws -> Int {
         let result = try git.run(in: repositoryURL, [
-            "status", "--porcelain=v1", "--untracked-files=normal", "-z"
+            "status", "--porcelain=v1", "--untracked-files=all", "-z"
         ])
         guard result.status == 0 else {
             throw NSError(
