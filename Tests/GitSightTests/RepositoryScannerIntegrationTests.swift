@@ -27,6 +27,11 @@ enum RepositoryScannerIntegrationTests {
         try expectEqual(result.repositories.map(\.path.path), [validURL.path], "valid repository survives another repository's failure")
         try expectEqual(result.failures.map(\.path.path), [brokenURL.path], "broken repository is reported without cancelling the scan")
         try expectEqual(updates.last?.fractionCompleted, 1, "scan reaches a determinate finished state")
+        try expectEqual(
+            zip(updates, updates.dropFirst()).allSatisfy { $0.fractionCompleted <= $1.fractionCompleted },
+            true,
+            "the shared scan progress bar does not reset between discovery and inspection"
+        )
     }
 
     static func testCancellationStopsBlockedRepositoryInspection() throws {
