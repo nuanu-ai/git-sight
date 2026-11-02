@@ -125,7 +125,12 @@ enum RepositoryInspectorIntegrationTests {
             encoding: .utf8
         )
 
+        let nestedURL = repositoryURL.appendingPathComponent("nested", isDirectory: true)
+        try fileManager.createDirectory(at: nestedURL, withIntermediateDirectories: true)
+        try "one\n".write(to: nestedURL.appendingPathComponent("one.txt"), atomically: true, encoding: .utf8)
+        try "two\n".write(to: nestedURL.appendingPathComponent("two.txt"), atomically: true, encoding: .utf8)
+
         let snapshot = try RepositoryInspector().inspect(repositoryAt: repositoryURL)
-        try expectEqual(snapshot.dirtyFileCount, 1, "untracked file is reported as uncommitted work")
+        try expectEqual(snapshot.dirtyFileCount, 3, "untracked files are counted individually inside new directories")
     }
 }
