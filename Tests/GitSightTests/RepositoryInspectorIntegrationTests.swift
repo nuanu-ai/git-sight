@@ -88,21 +88,6 @@ enum RepositoryInspectorIntegrationTests {
             failures: &failures
         )
         await run(
-            name: "history includes work outside the current branch",
-            CommitTopologyIntegrationTests.testHistoryIncludesWorkOutsideCurrentBranch,
-            failures: &failures
-        )
-        await run(
-            name: "history limit keeps every local branch tip",
-            CommitTopologyIntegrationTests.testHistoryLimitKeepsEveryLocalBranchTip,
-            failures: &failures
-        )
-        await run(
-            name: "included parents follow children across history limit",
-            CommitTopologyIntegrationTests.testIncludedParentsFollowChildrenAcrossHistoryLimit,
-            failures: &failures
-        )
-        await run(
             name: "inspector reports files changed by selected commit",
             ChangedFilesIntegrationTests.testReportsFilesChangedBySelectedCommit,
             failures: &failures
@@ -115,7 +100,9 @@ enum RepositoryInspectorIntegrationTests {
             ("repository without remote is flagged once", RepositoryScoringIntegrationTests.testRepositoryWithoutRemoteIsFlaggedOnce),
             ("branch deleted on the server is a notice", RepositoryScoringIntegrationTests.testBranchDeletedOnServerIsANotice),
             ("bare repository with worktrees is one repository", RepositoryScannerIntegrationTests.testBareRepositoryWithWorktreesIsOneRepository),
-            ("scan inspects more repositories than cores", RepositoryScannerIntegrationTests.testScanInspectsMoreRepositoriesThanCores)
+            ("scan inspects more repositories than cores", RepositoryScannerIntegrationTests.testScanInspectsMoreRepositoriesThanCores),
+            ("history ends where work left the server", CommitTopologyIntegrationTests.testHistoryEndsWhereWorkLeftTheServer),
+            ("uncommitted and stashed files are listed", ChangedFilesIntegrationTests.testReportsUncommittedAndStashedFiles)
         ] {
             await run(name: name, test, failures: &failures)
         }
