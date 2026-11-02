@@ -62,6 +62,9 @@ enum RepositoryScoringIntegrationTests {
         let oldWorktree = try inspector.inspect(repositoryAt: fixture.repository)
         try expectEqual(oldWorktree.worktrees.count, 2, "fixture contains an auxiliary worktree")
         try expectEqual(oldWorktree.score > oldBranch.score, true, "an old auxiliary worktree adds risk even without dirty files")
+        try "fresh\n".write(to: auxiliaryURL.appendingPathComponent("fresh.txt"), atomically: true, encoding: .utf8)
+        let activeWorktree = try inspector.inspect(repositoryAt: fixture.repository)
+        try expectEqual(activeWorktree.score, oldBranch.score, "fresh changes make an old worktree active rather than abandoned")
 
         let stashFixture = try makeRepository()
         defer { try? FileManager.default.removeItem(at: stashFixture.root) }
@@ -71,6 +74,49 @@ enum RepositoryScoringIntegrationTests {
         try expectEqual(oldStash.stashes.count, 1, "old stash is visible")
         try expectEqual(oldStash.severity, .warning, "a two-day-old stash alone creates warning risk")
         try expectEqual(oldStash.score > 0, true, "stash age contributes risk")
+    }
+
+    static func testDirtyAdditionalWorktreeNeedsOriginRisk() throws {
+        let fixture = try makeRepository()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let auxiliaryURL = fixture.root.appendingPathComponent("auxiliary")
+        try runGit(in: fixture.repository, ["worktree", "add", "-b", "auxiliary", auxiliaryURL.path, "main"])
+        try runGit(in: auxiliaryURL, ["branch", "--set-upstream-to=origin/main", "auxiliary"])
+        let otherURL = fixture.root.appendingPathComponent("other")
+        try runGit(in: fixture.root, ["clone", fixture.origin.path, otherURL.path])
+        try runGit(in: otherURL, ["config", "user.name", "Other User"])
+        try runGit(in: otherURL, ["config", "user.email", "other@example.com"])
+        try "origin\n".write(to: otherURL.appendingPathComponent("origin.txt"), atomically: true, encoding: .utf8)
+        try runGit(in: otherURL, ["add", "origin.txt"])
+        try runGit(in: otherURL, ["commit", "-m", "Origin movement"])
+        try runGit(in: otherURL, ["push"])
+        try runGit(in: fixture.repository, ["fetch", "origin"])
+        try "dirty\n".write(to: auxiliaryURL.appendingPathComponent("dirty.txt"), atomically: true, encoding: .utf8)
+
+        let snapshot = try RepositoryInspector().inspect(repositoryAt: fixture.repository)
+        try expectEqual(snapshot.dirtyFileCount, 0, "main checkout is clean")
+        try expectEqual(snapshot.worktrees.first { !$0.isMain }?.dirtyFileCount, 1, "additional worktree has uncommitted work")
+        try expectEqual(snapshot.severity, .warning, "dirty additional worktree becomes risky when its upstream moves")
+    }
+
+    static func testOldLocalMainIsUnpublishedWork() throws {
+        let repositoryURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent(".build/GitSightTests/\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: repositoryURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: repositoryURL) }
+        try runGit(in: repositoryURL, ["init", "-b", "main"])
+        try runGit(in: repositoryURL, ["config", "user.name", "Test User"])
+        try runGit(in: repositoryURL, ["config", "user.email", "test@example.com"])
+        try "local\n".write(to: repositoryURL.appendingPathComponent("local.txt"), atomically: true, encoding: .utf8)
+        try runGit(in: repositoryURL, ["add", "local.txt"])
+        try runGit(in: repositoryURL, ["commit", "-m", "Old local work"], environment: gitDate(daysAgo: 4))
+
+        let snapshot = try RepositoryInspector().inspect(repositoryAt: repositoryURL)
+        try expectEqual(snapshot.branches.first?.upstream, nil, "local main has no upstream")
+        try expectEqual(snapshot.severity, .warning, "old unpublished main is not exempt from abandonment risk")
     }
 
     private static func gitDate(daysAgo: Int) -> [String: String] {

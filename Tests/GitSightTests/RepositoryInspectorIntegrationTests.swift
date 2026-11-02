@@ -72,6 +72,16 @@ enum RepositoryInspectorIntegrationTests {
             RepositoryScoringIntegrationTests.testAbandonedWorkAgesIntoRisk,
             failures: &failures
         )
+        run(
+            name: "dirty additional worktree needs origin risk",
+            RepositoryScoringIntegrationTests.testDirtyAdditionalWorktreeNeedsOriginRisk,
+            failures: &failures
+        )
+        run(
+            name: "old local main is unpublished work",
+            RepositoryScoringIntegrationTests.testOldLocalMainIsUnpublishedWork,
+            failures: &failures
+        )
         if failures > 0 { exit(1) }
     }
 
