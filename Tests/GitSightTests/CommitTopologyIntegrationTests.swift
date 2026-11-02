@@ -123,4 +123,59 @@ enum CommitTopologyIntegrationTests {
         try expectEqual(history.map(\.subject), ["Local two", "Local one", "Pushed"], "history shows unsaved commits and stops at the commit the server has")
         try expectEqual(history.map(\.isBoundary), [false, false, true], "the commit the server has is marked as the fork point")
     }
+
+    static func testCutOffHistoryDoesNotClaimTheServerHasIt() throws {
+        let rootURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent(".build/GitSightTests/\(UUID().uuidString)", isDirectory: true)
+        let originURL = rootURL.appendingPathComponent("origin.git")
+        let repositoryURL = rootURL.appendingPathComponent("repository")
+        try FileManager.default.createDirectory(at: repositoryURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        try runGit(in: rootURL, ["init", "--bare", originURL.path])
+        try runGit(in: repositoryURL, ["init", "-b", "main"])
+        try runGit(in: repositoryURL, ["config", "user.name", "Test User"])
+        try runGit(in: repositoryURL, ["config", "user.email", "test@example.com"])
+        try runGit(in: repositoryURL, ["commit", "--allow-empty", "-m", "Pushed"])
+        try runGit(in: repositoryURL, ["remote", "add", "origin", originURL.path])
+        try runGit(in: repositoryURL, ["push", "-u", "origin", "main"])
+        try runGit(in: repositoryURL, ["checkout", "-b", "feature"])
+        for index in 1...305 {
+            try runGit(in: repositoryURL, ["commit", "--allow-empty", "-m", "Local \(index)"])
+        }
+
+        let history = try RepositoryInspector().history(in: repositoryURL, revisions: ["refs/heads/feature", "--not", "--remotes"])
+        try expectEqual(history.first?.subject, "Local 305", "long history starts at the branch tip")
+        try expectEqual(history.filter(\.isBoundary).map(\.subject), [], "a commit cut off by the history limit is not shown as the one the server has")
+    }
+
+    static func testHistoryReadsRevisionsShadowedByFileNames() throws {
+        let rootURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent(".build/GitSightTests/\(UUID().uuidString)", isDirectory: true)
+        let originURL = rootURL.appendingPathComponent("origin.git")
+        let repositoryURL = rootURL.appendingPathComponent("repository")
+        try FileManager.default.createDirectory(at: repositoryURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        try runGit(in: rootURL, ["init", "--bare", originURL.path])
+        try runGit(in: repositoryURL, ["init", "-b", "main"])
+        try runGit(in: repositoryURL, ["config", "user.name", "Test User"])
+        try runGit(in: repositoryURL, ["config", "user.email", "test@example.com"])
+        try runGit(in: repositoryURL, ["commit", "--allow-empty", "-m", "Pushed"])
+        try runGit(in: repositoryURL, ["remote", "add", "origin", originURL.path])
+        try runGit(in: repositoryURL, ["push", "-u", "origin", "main"])
+        try runGit(in: repositoryURL, ["checkout", "--detach"])
+        try runGit(in: repositoryURL, ["commit", "--allow-empty", "-m", "Detached work"])
+        try "not a revision\n".write(to: repositoryURL.appendingPathComponent("HEAD"), atomically: true, encoding: .utf8)
+
+        let history = try RepositoryInspector().history(
+            in: repositoryURL,
+            revisions: ["HEAD", "--not", "--remotes", "--branches", "--tags"]
+        )
+        try expectEqual(history.map(\.subject), ["Detached work", "Pushed"], "a file named HEAD in the worktree does not hide the history")
+    }
 }

@@ -102,6 +102,8 @@ enum RepositoryInspectorIntegrationTests {
             ("bare repository with worktrees is one repository", RepositoryScannerIntegrationTests.testBareRepositoryWithWorktreesIsOneRepository),
             ("scan inspects more repositories than cores", RepositoryScannerIntegrationTests.testScanInspectsMoreRepositoriesThanCores),
             ("history ends where work left the server", CommitTopologyIntegrationTests.testHistoryEndsWhereWorkLeftTheServer),
+            ("cut-off history does not claim the server has it", CommitTopologyIntegrationTests.testCutOffHistoryDoesNotClaimTheServerHasIt),
+            ("history reads revisions shadowed by file names", CommitTopologyIntegrationTests.testHistoryReadsRevisionsShadowedByFileNames),
             ("uncommitted and stashed files are listed", ChangedFilesIntegrationTests.testReportsUncommittedAndStashedFiles)
         ] {
             await run(name: name, test, failures: &failures)
