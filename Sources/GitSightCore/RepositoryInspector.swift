@@ -10,9 +10,11 @@ public struct RepositoryInspector {
             "symbolic-ref", "--quiet", "--short", "HEAD"
         ])?.trimmingCharacters(in: .whitespacesAndNewlines)
         let dirtyFileCount = try dirtyFiles(in: repositoryURL)
-        let divergence = try aheadAndBehind(in: repositoryURL, reference: "HEAD")
-        let worktrees = try worktrees(in: repositoryURL)
-        let branches = try branches(in: repositoryURL, worktrees: worktrees)
+        let worktreeEntries = try worktreeEntries(in: repositoryURL)
+        let branches = try branches(in: repositoryURL, checkedOut: Set(worktreeEntries.compactMap(\.branch)))
+        let worktrees = try worktrees(worktreeEntries, in: repositoryURL, branches: branches)
+        let currentBranchSnapshot = branches.first { $0.name == currentBranch }
+        let divergence = (ahead: currentBranchSnapshot?.ahead ?? 0, behind: currentBranchSnapshot?.behind ?? 0)
         let stashes = try stashes(in: repositoryURL)
         let commits = try commits(in: repositoryURL)
         let edges = commits.flatMap { commit in
@@ -97,26 +99,9 @@ public struct RepositoryInspector {
         return count
     }
 
-    private func aheadAndBehind(in repositoryURL: URL, reference: String) throws -> (ahead: Int, behind: Int) {
-        let arguments = ["rev-list", "--left-right", "--count", "\(reference)...@{upstream}"]
-        let result = try git.run(in: repositoryURL, arguments)
-        let noUpstreamMessages = [
-            "no upstream configured for branch",
-            "no such branch: 'HEAD...'",
-            "HEAD does not point to a branch"
-        ]
-        if noUpstreamMessages.contains(where: result.standardError.contains) {
-            return (0, 0)
-        }
-        let output = try git.output(from: result, in: repositoryURL, arguments)
-        let counts = output.split(whereSeparator: \.isWhitespace).compactMap { Int($0) }
-        guard counts.count == 2 else { return (0, 0) }
-        return (counts[0], counts[1])
-    }
-
-    private func worktrees(in repositoryURL: URL) throws -> [WorktreeSnapshot] {
+    private func worktreeEntries(in repositoryURL: URL) throws -> [(path: URL, head: String?, branch: String?)] {
         let output = try git.output(in: repositoryURL, ["worktree", "list", "--porcelain"])
-        var snapshots: [WorktreeSnapshot] = []
+        var entries: [(path: URL, head: String?, branch: String?)] = []
         for block in output.components(separatedBy: "\n\n") where !block.isEmpty {
             var path: String?
             var head: String?
@@ -131,49 +116,63 @@ public struct RepositoryInspector {
                 }
             }
             guard let path else { continue }
-            let url = URL(fileURLWithPath: path, isDirectory: true)
+            entries.append((URL(fileURLWithPath: path, isDirectory: true), head, branch))
+        }
+        return entries
+    }
+
+    private func worktrees(
+        _ entries: [(path: URL, head: String?, branch: String?)],
+        in repositoryURL: URL,
+        branches: [BranchSnapshot]
+    ) throws -> [WorktreeSnapshot] {
+        var snapshots: [WorktreeSnapshot] = []
+        for (index, entry) in entries.enumerated() {
             var isDirectory: ObjCBool = false
-            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            guard FileManager.default.fileExists(atPath: entry.path.path, isDirectory: &isDirectory), isDirectory.boolValue else {
                 continue
             }
             var date: Date?
-            if let head, head.contains(where: { $0 != "0" }) {
-                let dateString = try git.output(in: url, ["show", "-s", "--format=%cI", head])
+            if let head = entry.head, head.contains(where: { $0 != "0" }) {
+                let dateString = try git.output(in: entry.path, ["show", "-s", "--format=%cI", head])
                 date = Self.date(from: dateString.trimmingCharacters(in: .whitespacesAndNewlines))
             }
             snapshots.append(WorktreeSnapshot(
-                path: url,
-                name: url.lastPathComponent,
-                branch: branch,
-                isMain: snapshots.isEmpty,
-                dirtyFileCount: try dirtyFiles(in: url),
+                path: entry.path,
+                name: entry.path.lastPathComponent,
+                branch: entry.branch,
+                isMain: index == 0,
+                dirtyFileCount: try dirtyFiles(in: entry.path),
                 lastActivity: date,
-                behind: try aheadAndBehind(in: url, reference: "HEAD").behind
+                behind: branches.first { $0.name == entry.branch }?.behind ?? 0
             ))
         }
         return snapshots
     }
 
-    private func branches(in repositoryURL: URL, worktrees: [WorktreeSnapshot]) throws -> [BranchSnapshot] {
-        let format = "%(refname:short)%1F%(upstream:short)%1F%(committerdate:iso-strict)%1E"
+    private func branches(in repositoryURL: URL, checkedOut: Set<String>) throws -> [BranchSnapshot] {
+        let format = "%(refname:short)%1F%(upstream:short)%1F%(committerdate:iso-strict)%1F%(upstream:track)%1E"
         let output = try git.output(in: repositoryURL, [
             "for-each-ref", "--sort=refname", "--format=\(format)", "refs/heads"
         ])
-        let worktreeBranches = Set(worktrees.compactMap(\.branch))
         return try Self.records(output).map { record in
             let fields = Self.fields(record)
-            guard fields.count >= 3 else { throw Self.parseError(record) }
-            let upstream = fields[1].isEmpty ? nil : fields[1]
-            let divergence = try aheadAndBehind(in: repositoryURL, reference: fields[0])
+            guard fields.count >= 4 else { throw Self.parseError(record) }
             return BranchSnapshot(
                 name: fields[0],
-                upstream: upstream,
-                ahead: upstream == nil ? 0 : divergence.ahead,
-                behind: upstream == nil ? 0 : divergence.behind,
+                upstream: fields[1].isEmpty ? nil : fields[1],
+                ahead: Self.trackCount("ahead", in: fields[3]),
+                behind: Self.trackCount("behind", in: fields[3]),
                 lastCommitDate: Self.date(from: fields[2]),
-                hasWorktree: worktreeBranches.contains(fields[0])
+                hasWorktree: checkedOut.contains(fields[0])
             )
         }
+    }
+
+    /// Reads one count from `%(upstream:track)`, e.g. "[ahead 2, behind 3]".
+    private static func trackCount(_ word: String, in track: String) -> Int {
+        guard let range = track.range(of: "\(word) ") else { return 0 }
+        return Int(track[range.upperBound...].prefix { $0.isNumber }) ?? 0
     }
 
     private func stashes(in repositoryURL: URL) throws -> [StashSnapshot] {
