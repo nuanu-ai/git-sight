@@ -138,7 +138,8 @@ public struct RepositoryInspector {
                 branch: branch,
                 isMain: snapshots.isEmpty,
                 dirtyFileCount: try dirtyFiles(in: url),
-                lastActivity: date
+                lastActivity: date,
+                behind: try aheadAndBehind(in: url, reference: "HEAD").behind
             ))
         }
         return snapshots

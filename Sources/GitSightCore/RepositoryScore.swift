@@ -19,14 +19,18 @@ enum RepositoryScore {
             score += 50 + min(behind * 5, 20)
         }
         for branch in branches {
-            let isUnpublished = branch.upstream == nil && branch.name != "main" && branch.name != "master"
+            let isUnpublished = branch.upstream == nil
             guard isUnpublished || branch.ahead > 0,
                   let date = branch.lastCommitDate,
                   -date.timeIntervalSinceNow > abandonedBranchAge else { continue }
             score += 40
         }
         for worktree in worktrees where !worktree.isMain {
-            if let date = worktree.lastActivity, -date.timeIntervalSinceNow > abandonedWorktreeAge {
+            if worktree.dirtyFileCount > 0, worktree.behind > 0 {
+                score += 50 + min(worktree.behind * 5, 20)
+            } else if worktree.dirtyFileCount == 0,
+                      let date = worktree.lastActivity,
+                      -date.timeIntervalSinceNow > abandonedWorktreeAge {
                 score += 30
             }
         }

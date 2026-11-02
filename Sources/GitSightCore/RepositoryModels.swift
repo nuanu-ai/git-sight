@@ -14,14 +14,16 @@ public struct WorktreeSnapshot: Equatable {
     public let isMain: Bool
     public let dirtyFileCount: Int
     public let lastActivity: Date?
+    public let behind: Int
 
-    public init(path: URL, name: String, branch: String?, isMain: Bool, dirtyFileCount: Int, lastActivity: Date?) {
+    public init(path: URL, name: String, branch: String?, isMain: Bool, dirtyFileCount: Int, lastActivity: Date?, behind: Int = 0) {
         self.path = path
         self.name = name
         self.branch = branch
         self.isMain = isMain
         self.dirtyFileCount = dirtyFileCount
         self.lastActivity = lastActivity
+        self.behind = behind
     }
 }
 

@@ -82,8 +82,8 @@ enum RepositorySnapshotIntegrationTests {
         try expectEqual(snapshot.stashes.first?.name, "stash@{0}", "stash reports its ref name")
         try expectEqual(snapshot.stashes.first?.message.contains("saved work"), true, "stash reports its message")
         try expectEqual(snapshot.commits.map(\.subject).contains("Local work"), true, "snapshot reports recent commits")
-        try expectEqual(snapshot.commits.first?.author, "Test User", "commit reports its author")
-        try expectEqual(snapshot.lastActivity, snapshot.commits.first?.date, "repository reports latest commit activity")
+        try expectEqual(snapshot.commits.first { $0.subject == "Local work" }?.author, "Test User", "commit reports its author")
+        try expectEqual(snapshot.lastActivity, snapshot.worktrees.compactMap(\.lastActivity).max(), "repository reports latest local worktree activity")
         try expectEqual(fingerprintAfter, fingerprintBefore, "inspection leaves every repository file and directory unchanged")
     }
 
