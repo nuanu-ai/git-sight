@@ -55,7 +55,7 @@ enum RepositoryScoringIntegrationTests {
         try expectEqual(oldBranch.score > freshBranch.score, true, "branch age adds risk")
 
         let auxiliaryURL = fixture.root.appendingPathComponent("auxiliary", isDirectory: true)
-        try runGit(in: fixture.repository, ["worktree", "add", "-b", "auxiliary", auxiliaryURL.path, "main"])
+        try runGit(in: fixture.repository, ["worktree", "add", "--detach", auxiliaryURL.path, "main"])
         try "auxiliary\n".write(to: auxiliaryURL.appendingPathComponent("auxiliary.txt"), atomically: true, encoding: .utf8)
         try runGit(in: auxiliaryURL, ["add", "auxiliary.txt"])
         try runGit(in: auxiliaryURL, ["commit", "-m", "Old auxiliary work"], environment: oldBranchDate)
@@ -63,12 +63,14 @@ enum RepositoryScoringIntegrationTests {
         try expectEqual(oldWorktree.worktrees.count, 2, "fixture contains an auxiliary worktree")
         try expectEqual(oldWorktree.score > oldBranch.score, true, "an old auxiliary worktree adds risk even without dirty files")
 
-        try "old stash\n".write(to: fixture.repository.appendingPathComponent("tracked.txt"), atomically: true, encoding: .utf8)
-        try runGit(in: fixture.repository, ["stash", "push", "-m", "old work"], environment: gitDate(daysAgo: 2))
-        let oldStash = try inspector.inspect(repositoryAt: fixture.repository)
+        let stashFixture = try makeRepository()
+        defer { try? FileManager.default.removeItem(at: stashFixture.root) }
+        try "old stash\n".write(to: stashFixture.repository.appendingPathComponent("tracked.txt"), atomically: true, encoding: .utf8)
+        try runGit(in: stashFixture.repository, ["stash", "push", "-m", "old work"], environment: gitDate(daysAgo: 2))
+        let oldStash = try inspector.inspect(repositoryAt: stashFixture.repository)
         try expectEqual(oldStash.stashes.count, 1, "old stash is visible")
-        try expectEqual(oldStash.severity == .warning || oldStash.severity == .critical, true, "a stash older than one day creates at least warning risk")
-        try expectEqual(oldStash.score > oldWorktree.score, true, "stash age contributes risk")
+        try expectEqual(oldStash.severity, .warning, "a two-day-old stash alone creates warning risk")
+        try expectEqual(oldStash.score > 0, true, "stash age contributes risk")
     }
 
     private static func gitDate(daysAgo: Int) -> [String: String] {

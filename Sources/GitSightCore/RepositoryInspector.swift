@@ -23,6 +23,7 @@ public struct RepositoryInspector {
         let assessment = RepositoryScore.evaluate(
             dirtyFileCount: dirtyFileCount,
             behind: divergence.behind,
+            worktrees: worktrees,
             branches: branches,
             stashes: stashes
         )

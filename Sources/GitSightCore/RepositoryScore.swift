@@ -3,12 +3,14 @@ import Foundation
 enum RepositoryScore {
     static let warningThreshold = 40
     static let criticalThreshold = 80
-    static let oldObjectAge: TimeInterval = 30 * 24 * 60 * 60
-    static let veryOldObjectAge: TimeInterval = 90 * 24 * 60 * 60
+    static let abandonedBranchAge: TimeInterval = 3 * 24 * 60 * 60
+    static let abandonedWorktreeAge: TimeInterval = 3 * 24 * 60 * 60
+    static let abandonedStashAge: TimeInterval = 24 * 60 * 60
 
     static func evaluate(
         dirtyFileCount: Int,
         behind: Int,
+        worktrees: [WorktreeSnapshot],
         branches: [BranchSnapshot],
         stashes: [StashSnapshot]
     ) -> (score: Int, severity: Severity) {
@@ -18,16 +20,18 @@ enum RepositoryScore {
         }
         for branch in branches {
             let isUnpublished = branch.upstream == nil && branch.name != "main" && branch.name != "master"
-            guard isUnpublished || branch.ahead > 0 else { continue }
-            score += 20 + min(branch.ahead * 5, 20)
-            if let date = branch.lastCommitDate, -date.timeIntervalSinceNow > oldObjectAge {
-                score += 10
+            guard isUnpublished || branch.ahead > 0,
+                  let date = branch.lastCommitDate,
+                  -date.timeIntervalSinceNow > abandonedBranchAge else { continue }
+            score += 40
+        }
+        for worktree in worktrees where !worktree.isMain {
+            if let date = worktree.lastActivity, -date.timeIntervalSinceNow > abandonedWorktreeAge {
+                score += 30
             }
         }
-        for stash in stashes {
-            let age = -stash.date.timeIntervalSinceNow
-            if age > oldObjectAge { score += 25 }
-            if age > veryOldObjectAge { score += 25 }
+        for stash in stashes where -stash.date.timeIntervalSinceNow > abandonedStashAge {
+            score += 50
         }
         score = min(score, 100)
 
