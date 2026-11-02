@@ -78,6 +78,8 @@ public struct RepositoryScanner {
             try Task.checkCancellation()
             do {
                 snapshots.append(try inspector.inspect(repositoryAt: repositoryURL))
+            } catch is CancellationError {
+                throw CancellationError()
             } catch {
                 failures.append(RepositoryScanFailure(
                     path: repositoryURL,
