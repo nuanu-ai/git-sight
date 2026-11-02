@@ -179,7 +179,7 @@ public struct RepositoryInspector {
         }
         let format = "%H%x1F%h%x1F%s%x1F%an%x1F%cI%x1F%P%x1F%D%x1E"
         let output = try git.output(in: repositoryURL, [
-            "log", "--topo-order", "-n", "100", "--date=iso-strict", "--pretty=format:\(format)"
+            "log", "--all", "--topo-order", "-n", "100", "--date=iso-strict", "--pretty=format:\(format)"
         ])
         let parsedCommits = try Self.records(output).map { record in
             let fields = Self.fields(record)
