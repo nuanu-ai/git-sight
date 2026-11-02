@@ -38,6 +38,11 @@ enum RepositoryInspectorIntegrationTests {
             failures: &failures
         )
         run(
+            name: "broken repository does not cancel scan",
+            RepositoryScannerIntegrationTests.testBrokenRepositoryDoesNotCancelScan,
+            failures: &failures
+        )
+        run(
             name: "inspector reports repository objects without changing filesystem",
             RepositorySnapshotIntegrationTests.testReportsRepositoryObjectsWithoutChangingFilesystem,
             failures: &failures
