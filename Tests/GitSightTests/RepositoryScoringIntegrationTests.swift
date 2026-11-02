@@ -31,7 +31,7 @@ enum RepositoryScoringIntegrationTests {
         try expectEqual(diverged.score > dirtyOnly.score, true, "origin movement adds integral risk")
     }
 
-    static func testOldStashAndUnpushedBranchAccumulateRisk() throws {
+    static func testAbandonedWorkAgesIntoRisk() throws {
         let fixture = try makeRepository()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
         try runGit(in: fixture.repository, ["checkout", "-b", "feature"])
@@ -41,24 +41,39 @@ enum RepositoryScoringIntegrationTests {
         try runGit(in: fixture.repository, ["checkout", "main"])
 
         let inspector = RepositoryInspector()
-        let unpushedOnly = try inspector.inspect(repositoryAt: fixture.repository)
-        try expectEqual(unpushedOnly.branches.first { $0.name == "feature" }?.upstream, nil, "feature has not been pushed")
-        try expectEqual(unpushedOnly.severity, .attention, "an unpushed branch adds attention-level risk")
-        try expectEqual(unpushedOnly.score > 0, true, "an unpushed branch increases the score")
+        let freshBranch = try inspector.inspect(repositoryAt: fixture.repository)
+        try expectEqual(freshBranch.branches.first { $0.name == "feature" }?.upstream, nil, "feature has not been pushed")
+        try expectEqual(freshBranch.score, 0, "fresh unpushed work does not create noise")
+        try expectEqual(freshBranch.severity, .clean, "fresh unpushed work stays clean")
+
+        let oldBranchDate = gitDate(daysAgo: 4)
+        try runGit(in: fixture.repository, ["checkout", "feature"])
+        try runGit(in: fixture.repository, ["commit", "--amend", "--no-edit"], environment: oldBranchDate)
+        try runGit(in: fixture.repository, ["checkout", "main"])
+        let oldBranch = try inspector.inspect(repositoryAt: fixture.repository)
+        try expectEqual(oldBranch.severity, .warning, "an unpushed branch older than three days needs attention")
+        try expectEqual(oldBranch.score > freshBranch.score, true, "branch age adds risk")
+
+        let auxiliaryURL = fixture.root.appendingPathComponent("auxiliary", isDirectory: true)
+        try runGit(in: fixture.repository, ["worktree", "add", "-b", "auxiliary", auxiliaryURL.path, "main"])
+        try "auxiliary\n".write(to: auxiliaryURL.appendingPathComponent("auxiliary.txt"), atomically: true, encoding: .utf8)
+        try runGit(in: auxiliaryURL, ["add", "auxiliary.txt"])
+        try runGit(in: auxiliaryURL, ["commit", "-m", "Old auxiliary work"], environment: oldBranchDate)
+        let oldWorktree = try inspector.inspect(repositoryAt: fixture.repository)
+        try expectEqual(oldWorktree.worktrees.count, 2, "fixture contains an auxiliary worktree")
+        try expectEqual(oldWorktree.score > oldBranch.score, true, "an old auxiliary worktree adds risk even without dirty files")
 
         try "old stash\n".write(to: fixture.repository.appendingPathComponent("tracked.txt"), atomically: true, encoding: .utf8)
-        let oldDate = Date(timeIntervalSinceNow: -40 * 24 * 60 * 60)
-        let oldDateString = ISO8601DateFormatter().string(from: oldDate)
-        try runGit(in: fixture.repository, ["stash", "push", "-m", "old work"], environment: [
-            "GIT_AUTHOR_DATE": oldDateString,
-            "GIT_COMMITTER_DATE": oldDateString
-        ])
+        try runGit(in: fixture.repository, ["stash", "push", "-m", "old work"], environment: gitDate(daysAgo: 2))
+        let oldStash = try inspector.inspect(repositoryAt: fixture.repository)
+        try expectEqual(oldStash.stashes.count, 1, "old stash is visible")
+        try expectEqual(oldStash.severity == .warning || oldStash.severity == .critical, true, "a stash older than one day creates at least warning risk")
+        try expectEqual(oldStash.score > oldWorktree.score, true, "stash age contributes risk")
+    }
 
-        let combined = try inspector.inspect(repositoryAt: fixture.repository)
-        try expectEqual(combined.stashes.count, 1, "old stash is visible")
-        try expectEqual((combined.stashes.first?.date.timeIntervalSinceNow ?? 0) < -30 * 24 * 60 * 60, true, "stash fixture is genuinely old")
-        try expectEqual(combined.severity, .warning, "old stash and unpushed branch combine into warning risk")
-        try expectEqual(combined.score > unpushedOnly.score, true, "old stash adds to existing branch risk")
+    private static func gitDate(daysAgo: Int) -> [String: String] {
+        let value = ISO8601DateFormatter().string(from: Date(timeIntervalSinceNow: TimeInterval(-daysAgo * 24 * 60 * 60)))
+        return ["GIT_AUTHOR_DATE": value, "GIT_COMMITTER_DATE": value]
     }
 
     private static func makeRepository() throws -> (root: URL, repository: URL, origin: URL) {

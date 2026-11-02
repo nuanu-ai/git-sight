@@ -58,8 +58,8 @@ enum RepositoryInspectorIntegrationTests {
             failures: &failures
         )
         run(
-            name: "old stash and unpushed branch accumulate risk",
-            RepositoryScoringIntegrationTests.testOldStashAndUnpushedBranchAccumulateRisk,
+            name: "abandoned branches, worktrees, and stashes age into risk",
+            RepositoryScoringIntegrationTests.testAbandonedWorkAgesIntoRisk,
             failures: &failures
         )
         if failures > 0 { exit(1) }
