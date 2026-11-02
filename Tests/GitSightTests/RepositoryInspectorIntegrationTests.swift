@@ -41,6 +41,11 @@ enum RepositoryInspectorIntegrationTests {
             RepositorySnapshotIntegrationTests.testReportsRepositoryObjectsWithoutChangingFilesystem,
             failures: &failures
         )
+        run(
+            name: "commit topology has stable parent edges and distinct rails",
+            CommitTopologyIntegrationTests.testMergeCommitHasStableParentEdgesAndDistinctRails,
+            failures: &failures
+        )
         if failures > 0 { exit(1) }
     }
 
