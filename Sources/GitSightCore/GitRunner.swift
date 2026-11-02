@@ -184,19 +184,24 @@ struct GitRunner {
     }
 
     func output(in repositoryURL: URL, _ arguments: [String]) throws -> String {
-        let result = try run(in: repositoryURL, arguments)
+        try output(from: run(in: repositoryURL, arguments), in: repositoryURL, arguments)
+    }
+
+    func output(from result: GitResult, in repositoryURL: URL, _ arguments: [String]) throws -> String {
         guard result.status == 0 else {
+            let details = result.standardError.trimmingCharacters(in: .whitespacesAndNewlines)
             throw NSError(
-                domain: "GitSight.GitRunner",
+                domain: "GitSight.GitRunner.Command",
                 code: Int(result.status),
-                userInfo: [NSLocalizedDescriptionKey: result.standardError]
+                userInfo: [NSLocalizedDescriptionKey: "git \(arguments.joined(separator: " ")) в \(repositoryURL.path): статус \(result.status): \(details.isEmpty ? "без сообщения" : details)"]
             )
         }
         return String(decoding: result.standardOutput, as: UTF8.self)
     }
 
-    func optionalOutput(in repositoryURL: URL, _ arguments: [String]) throws -> String? {
+    func optionalOutput(in repositoryURL: URL, _ arguments: [String], expectedStatus: Int32 = 1) throws -> String? {
         let result = try run(in: repositoryURL, arguments)
-        return result.status == 0 ? String(decoding: result.standardOutput, as: UTF8.self) : nil
+        if result.status == expectedStatus { return nil }
+        return try output(from: result, in: repositoryURL, arguments)
     }
 }

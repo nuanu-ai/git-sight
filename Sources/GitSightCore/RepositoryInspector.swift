@@ -18,7 +18,7 @@ public struct RepositoryInspector {
         let edges = commits.flatMap { commit in
             commit.parents.map { CommitEdge(from: commit.fullHash, to: $0) }
         }
-        let remote = try git.optionalOutput(in: repositoryURL, ["remote", "get-url", "origin"])
+        let remote = try git.optionalOutput(in: repositoryURL, ["remote", "get-url", "origin"], expectedStatus: 2)
         let lastActivity = worktrees.compactMap(\.lastActivity).max() ?? commits.first?.date
         let assessment = RepositoryScore.evaluate(
             dirtyFileCount: dirtyFileCount,
@@ -98,9 +98,17 @@ public struct RepositoryInspector {
     }
 
     private func aheadAndBehind(in repositoryURL: URL, reference: String) throws -> (ahead: Int, behind: Int) {
-        guard let output = try git.optionalOutput(in: repositoryURL, [
-            "rev-list", "--left-right", "--count", "\(reference)...@{upstream}"
-        ]) else { return (0, 0) }
+        let arguments = ["rev-list", "--left-right", "--count", "\(reference)...@{upstream}"]
+        let result = try git.run(in: repositoryURL, arguments)
+        let noUpstreamMessages = [
+            "no upstream configured for branch",
+            "no such branch: 'HEAD...'",
+            "HEAD does not point to a branch"
+        ]
+        if noUpstreamMessages.contains(where: result.standardError.contains) {
+            return (0, 0)
+        }
+        let output = try git.output(from: result, in: repositoryURL, arguments)
         let counts = output.split(whereSeparator: \.isWhitespace).compactMap { Int($0) }
         guard counts.count == 2 else { return (0, 0) }
         return (counts[0], counts[1])
@@ -129,7 +137,8 @@ public struct RepositoryInspector {
                 continue
             }
             var date: Date?
-            if let head, let dateString = try git.optionalOutput(in: url, ["show", "-s", "--format=%cI", head]) {
+            if let head, head.contains(where: { $0 != "0" }) {
+                let dateString = try git.output(in: url, ["show", "-s", "--format=%cI", head])
                 date = Self.date(from: dateString.trimmingCharacters(in: .whitespacesAndNewlines))
             }
             snapshots.append(WorktreeSnapshot(
@@ -179,7 +188,7 @@ public struct RepositoryInspector {
     }
 
     private func commits(in repositoryURL: URL) throws -> [CommitSnapshot] {
-        guard try git.optionalOutput(in: repositoryURL, ["rev-parse", "--verify", "HEAD"]) != nil else {
+        guard try git.optionalOutput(in: repositoryURL, ["rev-parse", "--verify", "--quiet", "HEAD"]) != nil else {
             return []
         }
         let format = "%H%x1F%h%x1F%s%x1F%an%x1F%cI%x1F%P%x1F%D%x1E"
