@@ -48,6 +48,11 @@ enum RepositoryInspectorIntegrationTests {
             failures: &failures
         )
         run(
+            name: "inherited Git environment cannot redirect inspection",
+            RepositorySnapshotIntegrationTests.testGitEnvironmentCannotRedirectInspection,
+            failures: &failures
+        )
+        run(
             name: "commit topology has stable parent edges and distinct rails",
             CommitTopologyIntegrationTests.testMergeCommitHasStableParentEdgesAndDistinctRails,
             failures: &failures

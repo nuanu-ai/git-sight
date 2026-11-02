@@ -109,6 +109,36 @@ enum RepositorySnapshotIntegrationTests {
         try expectEqual(snapshot.name, repositoryURL.lastPathComponent, "repository remains inspectable")
         try expectEqual(snapshot.worktrees.map(\.path), [repositoryURL], "missing worktree is omitted without pruning repository metadata")
     }
+
+    static func testGitEnvironmentCannotRedirectInspection() throws {
+        let rootURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent(".build/GitSightTests/\(UUID().uuidString)", isDirectory: true)
+        let otherURL = rootURL.appendingPathComponent("other")
+        let selectedURL = rootURL.appendingPathComponent("selected")
+        for (url, branch) in [(otherURL, "other"), (selectedURL, "main")] {
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+            try runGit(in: url, ["init", "-b", branch])
+            try runGit(in: url, ["config", "user.name", "Test User"])
+            try runGit(in: url, ["config", "user.email", "test@example.com"])
+            try "initial\n".write(to: url.appendingPathComponent("tracked.txt"), atomically: true, encoding: .utf8)
+            try runGit(in: url, ["add", "tracked.txt"])
+            try runGit(in: url, ["commit", "-m", "Initial"])
+        }
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        setenv("GIT_DIR", otherURL.appendingPathComponent(".git").path, 1)
+        setenv("GIT_WORK_TREE", otherURL.path, 1)
+        defer {
+            unsetenv("GIT_DIR")
+            unsetenv("GIT_WORK_TREE")
+        }
+
+        let snapshot = try RepositoryInspector().inspect(repositoryAt: selectedURL)
+        try expectEqual(snapshot.path, selectedURL, "snapshot retains selected repository path")
+        try expectEqual(snapshot.currentBranch, "main", "inherited Git environment cannot redirect inspection to another repository")
+    }
 }
 
 private func filesystemFingerprint(of rootURL: URL) throws -> String {
