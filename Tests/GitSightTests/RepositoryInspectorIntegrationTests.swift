@@ -78,6 +78,11 @@ enum RepositoryInspectorIntegrationTests {
             failures: &failures
         )
         run(
+            name: "independent lane survives interleaved merge parents",
+            CommitTopologyIntegrationTests.testIndependentLaneSurvivesInterleavedMergeParents,
+            failures: &failures
+        )
+        run(
             name: "history includes work outside the current branch",
             CommitTopologyIntegrationTests.testHistoryIncludesWorkOutsideCurrentBranch,
             failures: &failures
@@ -85,6 +90,11 @@ enum RepositoryInspectorIntegrationTests {
         run(
             name: "history limit keeps every local branch tip",
             CommitTopologyIntegrationTests.testHistoryLimitKeepsEveryLocalBranchTip,
+            failures: &failures
+        )
+        run(
+            name: "included parents follow children across history limit",
+            CommitTopologyIntegrationTests.testIncludedParentsFollowChildrenAcrossHistoryLimit,
             failures: &failures
         )
         run(
