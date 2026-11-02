@@ -19,12 +19,13 @@ public struct RepositoryDiscovery {
             includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
             options: []
         )
+        let excludedDirectories: Set<String> = ["Library", "node_modules"]
         for child in children {
             let name = child.lastPathComponent
-            guard !name.hasPrefix("."), name != "node_modules", name != ".build" else { continue }
+            guard !name.hasPrefix("."), !excludedDirectories.contains(name) else { continue }
             let values = try child.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
             guard values.isDirectory == true, values.isSymbolicLink != true else { continue }
-            repositories.append(contentsOf: try search(child))
+            repositories.append(contentsOf: (try? search(child)) ?? [])
         }
         return repositories
     }
