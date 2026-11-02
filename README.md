@@ -8,6 +8,10 @@ It only shows. Deciding what to do about it stays with you.
 
 Early development. There is no buildable app yet; the UI concept and design notes are kept outside the repository for now.
 
+## Contributing
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) for the test-first workflow, mutation checks, and review policy.
+
 ## License
 
 MIT

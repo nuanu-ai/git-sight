@@ -1,6 +1,14 @@
 # macOS
 .DS_Store
 
+# Swift и mutation testing
+.build/
+.swiftpm/
+muter_tmp/
+_mutated/
+muter-mappings.json
+muter-report.*
+
 # Локальные материалы: UI-концепт, рабочие заметки и скиллы
 # не входят в публичный репозиторий
 index.html
