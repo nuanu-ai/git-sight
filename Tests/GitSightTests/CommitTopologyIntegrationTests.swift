@@ -54,6 +54,8 @@ enum CommitTopologyIntegrationTests {
         )
         try expectEqual(repeatedSnapshot.commits, snapshot.commits, "commit rails remain stable across inspection")
         try expectEqual(repeatedSnapshot.edges, snapshot.edges, "parent edges remain stable across inspection")
+        let mergeFiles = try inspector.changedFiles(in: repositoryURL, commit: merge!)
+        try expectEqual(mergeFiles.map(\.path), ["feature.txt"], "expanding a merge shows changes against its first parent")
     }
 
     static func testHistoryIncludesWorkOutsideCurrentBranch() throws {
