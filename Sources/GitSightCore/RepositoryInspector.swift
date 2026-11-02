@@ -124,6 +124,10 @@ public struct RepositoryInspector {
             }
             guard let path else { continue }
             let url = URL(fileURLWithPath: path, isDirectory: true)
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+                continue
+            }
             var date: Date?
             if let head, let dateString = try git.optionalOutput(in: url, ["show", "-s", "--format=%cI", head]) {
                 date = Self.date(from: dateString.trimmingCharacters(in: .whitespacesAndNewlines))
