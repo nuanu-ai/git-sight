@@ -109,7 +109,10 @@ final class WorkspaceModel: ObservableObject {
             switch result {
             case .success(let scanResult):
                 self.repositories = scanResult.repositories.sorted {
-                    if $0.score != $1.score { return $0.score > $1.score }
+                    if $0.severity != $1.severity { return $0.severity > $1.severity }
+                    if $0.oldestUnsavedWork != $1.oldestUnsavedWork {
+                        return ($0.oldestUnsavedWork ?? .distantFuture) < ($1.oldestUnsavedWork ?? .distantFuture)
+                    }
                     return $0.name.localizedStandardCompare($1.name) == .orderedAscending
                 }
                 self.scanFailures = scanResult.failures

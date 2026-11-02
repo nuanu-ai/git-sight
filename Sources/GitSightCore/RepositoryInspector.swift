@@ -9,7 +9,7 @@ public struct RepositoryInspector {
         let currentBranch = try git.optionalOutput(in: repositoryURL, [
             "symbolic-ref", "--quiet", "--short", "HEAD"
         ])?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let dirtyFileCount = try dirtyFiles(in: repositoryURL)
+        let dirtyFileCount = try dirtyFiles(in: repositoryURL).count
         let worktreeEntries = try worktreeEntries(in: repositoryURL)
         let branches = try branches(in: repositoryURL, checkedOut: Set(worktreeEntries.compactMap(\.branch)))
         let worktrees = try worktrees(worktreeEntries, in: repositoryURL, branches: branches)
@@ -21,10 +21,10 @@ public struct RepositoryInspector {
             commit.parents.map { CommitEdge(from: commit.fullHash, to: $0) }
         }
         let remote = try git.optionalOutput(in: repositoryURL, ["remote", "get-url", "origin"], expectedStatus: 2)
+        let hasRemote = try !git.output(in: repositoryURL, ["remote"]).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let lastActivity = worktrees.compactMap(\.lastActivity).max() ?? commits.first?.date
         let assessment = RepositoryScore.evaluate(
-            dirtyFileCount: dirtyFileCount,
-            behind: divergence.behind,
+            hasRemote: hasRemote,
             worktrees: worktrees,
             branches: branches,
             stashes: stashes
@@ -44,7 +44,8 @@ public struct RepositoryInspector {
             edges: edges,
             remoteWebURL: remote.flatMap(webURL(from:)),
             lastActivity: lastActivity,
-            score: assessment.score,
+            hasRemote: hasRemote,
+            oldestUnsavedWork: assessment.oldestUnsavedWork,
             severity: assessment.severity
         )
     }
@@ -74,7 +75,7 @@ public struct RepositoryInspector {
         return files
     }
 
-    private func dirtyFiles(in repositoryURL: URL) throws -> Int {
+    private func dirtyFiles(in repositoryURL: URL) throws -> (count: Int, modifiedAt: Date?) {
         let result = try git.run(in: repositoryURL, [
             "status", "--porcelain=v1", "--untracked-files=all", "-z"
         ])
@@ -86,6 +87,7 @@ public struct RepositoryInspector {
             )
         }
         var count = 0
+        var modifiedAt: Date?
         var skipOriginalPath = false
         for record in result.standardOutput.split(separator: 0) {
             if skipOriginalPath {
@@ -95,8 +97,15 @@ public struct RepositoryInspector {
             let status = String(decoding: record.prefix(2), as: UTF8.self)
             count += 1
             skipOriginalPath = status.contains("R") || status.contains("C")
+            let path = String(decoding: record.dropFirst(3), as: UTF8.self)
+            // Deleted files have no date; the remaining files still date the work.
+            if let date = (try? FileManager.default.attributesOfItem(
+                atPath: repositoryURL.appendingPathComponent(path).path
+            ))?[.modificationDate] as? Date {
+                modifiedAt = max(modifiedAt ?? date, date)
+            }
         }
-        return count
+        return (count, modifiedAt)
     }
 
     private func worktreeEntries(in repositoryURL: URL) throws -> [(path: URL, head: String?, branch: String?)] {
@@ -137,36 +146,52 @@ public struct RepositoryInspector {
                 let dateString = try git.output(in: entry.path, ["show", "-s", "--format=%cI", head])
                 date = Self.date(from: dateString.trimmingCharacters(in: .whitespacesAndNewlines))
             }
+            var detachedCommits = 0
+            if entry.branch == nil, let head = entry.head, head.contains(where: { $0 != "0" }) {
+                detachedCommits = try Self.count(git.output(in: repositoryURL, [
+                    "rev-list", "--count", head, "--not", "--remotes", "--branches"
+                ]))
+            }
+            let dirty = try dirtyFiles(in: entry.path)
             snapshots.append(WorktreeSnapshot(
                 path: entry.path,
                 name: entry.path.lastPathComponent,
                 branch: entry.branch,
                 isMain: index == 0,
-                dirtyFileCount: try dirtyFiles(in: entry.path),
+                dirtyFileCount: dirty.count,
+                dirtyModifiedAt: dirty.modifiedAt,
                 lastActivity: date,
-                behind: branches.first { $0.name == entry.branch }?.behind ?? 0
+                behind: branches.first { $0.name == entry.branch }?.behind ?? 0,
+                unpushedCommits: detachedCommits
             ))
         }
         return snapshots
     }
 
     private func branches(in repositoryURL: URL, checkedOut: Set<String>) throws -> [BranchSnapshot] {
-        let format = "%(refname:short)%1F%(upstream:short)%1F%(committerdate:iso-strict)%1F%(upstream:track)%1E"
+        let format = "%(refname:short)%1F%(upstream:short)%1F%(committerdate:iso-strict)%1F%(upstream:track)%1F%(refname)%1E"
         let output = try git.output(in: repositoryURL, [
             "for-each-ref", "--sort=refname", "--format=\(format)", "refs/heads"
         ])
         return try Self.records(output).map { record in
             let fields = Self.fields(record)
-            guard fields.count >= 4 else { throw Self.parseError(record) }
+            guard fields.count >= 5 else { throw Self.parseError(record) }
+            let unpushed = try git.output(in: repositoryURL, ["rev-list", "--count", fields[4], "--not", "--remotes"])
             return BranchSnapshot(
                 name: fields[0],
                 upstream: fields[1].isEmpty ? nil : fields[1],
                 ahead: Self.trackCount("ahead", in: fields[3]),
                 behind: Self.trackCount("behind", in: fields[3]),
                 lastCommitDate: Self.date(from: fields[2]),
-                hasWorktree: checkedOut.contains(fields[0])
+                hasWorktree: checkedOut.contains(fields[0]),
+                unpushedCommits: try Self.count(unpushed)
             )
         }
+    }
+
+    private static func count(_ output: String) throws -> Int {
+        guard let value = Int(output.trimmingCharacters(in: .whitespacesAndNewlines)) else { throw parseError(output) }
+        return value
     }
 
     /// Reads one count from `%(upstream:track)`, e.g. "[ahead 2, behind 3]".

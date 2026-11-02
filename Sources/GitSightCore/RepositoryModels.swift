@@ -1,10 +1,16 @@
 import Foundation
 
-public enum Severity: String, Equatable {
+public enum Severity: Int, Comparable {
+    /// Nothing exists only on this machine.
     case clean
+    /// Work in progress, or a repository with no remote at all.
     case attention
+    /// Unsaved work untouched long enough to count as abandoned.
     case warning
+    /// Abandoned for over a month.
     case critical
+
+    public static func < (lhs: Severity, rhs: Severity) -> Bool { lhs.rawValue < rhs.rawValue }
 }
 
 public struct WorktreeSnapshot: Equatable {
@@ -13,17 +19,33 @@ public struct WorktreeSnapshot: Equatable {
     public let branch: String?
     public let isMain: Bool
     public let dirtyFileCount: Int
+    /// Latest modification among uncommitted files.
+    public let dirtyModifiedAt: Date?
     public let lastActivity: Date?
     public let behind: Int
+    /// Commits on a detached HEAD that no branch or remote contains.
+    public let unpushedCommits: Int
 
-    public init(path: URL, name: String, branch: String?, isMain: Bool, dirtyFileCount: Int, lastActivity: Date?, behind: Int = 0) {
+    public init(
+        path: URL,
+        name: String,
+        branch: String?,
+        isMain: Bool,
+        dirtyFileCount: Int,
+        dirtyModifiedAt: Date? = nil,
+        lastActivity: Date?,
+        behind: Int = 0,
+        unpushedCommits: Int = 0
+    ) {
         self.path = path
         self.name = name
         self.branch = branch
         self.isMain = isMain
         self.dirtyFileCount = dirtyFileCount
+        self.dirtyModifiedAt = dirtyModifiedAt
         self.lastActivity = lastActivity
         self.behind = behind
+        self.unpushedCommits = unpushedCommits
     }
 }
 
@@ -34,14 +56,17 @@ public struct BranchSnapshot: Equatable {
     public let behind: Int
     public let lastCommitDate: Date?
     public let hasWorktree: Bool
+    /// Commits on this branch that no remote-tracking ref contains.
+    public let unpushedCommits: Int
 
-    public init(name: String, upstream: String?, ahead: Int, behind: Int, lastCommitDate: Date?, hasWorktree: Bool) {
+    public init(name: String, upstream: String?, ahead: Int, behind: Int, lastCommitDate: Date?, hasWorktree: Bool, unpushedCommits: Int = 0) {
         self.name = name
         self.upstream = upstream
         self.ahead = ahead
         self.behind = behind
         self.lastCommitDate = lastCommitDate
         self.hasWorktree = hasWorktree
+        self.unpushedCommits = unpushedCommits
     }
 }
 
@@ -113,7 +138,9 @@ public struct RepositorySnapshot: Equatable {
     public let edges: [CommitEdge]
     public let remoteWebURL: URL?
     public let lastActivity: Date?
-    public let score: Int
+    public let hasRemote: Bool
+    /// Date of the oldest work that exists only on this machine.
+    public let oldestUnsavedWork: Date?
     public let severity: Severity
 
     public init(
@@ -130,7 +157,8 @@ public struct RepositorySnapshot: Equatable {
         edges: [CommitEdge] = [],
         remoteWebURL: URL? = nil,
         lastActivity: Date? = nil,
-        score: Int = 0,
+        hasRemote: Bool = true,
+        oldestUnsavedWork: Date? = nil,
         severity: Severity = .clean
     ) {
         self.path = path
@@ -146,7 +174,8 @@ public struct RepositorySnapshot: Equatable {
         self.edges = edges
         self.remoteWebURL = remoteWebURL
         self.lastActivity = lastActivity
-        self.score = score
+        self.hasRemote = hasRemote
+        self.oldestUnsavedWork = oldestUnsavedWork
         self.severity = severity
     }
 }
