@@ -183,22 +183,37 @@ public struct RepositoryInspector {
             return []
         }
         let format = "%H%x1F%h%x1F%s%x1F%an%x1F%cI%x1F%P%x1F%D%x1E"
+        func parseCommits(_ output: String) throws -> [CommitSnapshot] {
+            try Self.records(output).map { record in
+                let fields = Self.fields(record)
+                guard fields.count >= 7, let date = Self.date(from: fields[4]) else { throw Self.parseError(record) }
+                return CommitSnapshot(
+                    fullHash: fields[0],
+                    shortHash: fields[1],
+                    subject: fields[2],
+                    author: fields[3],
+                    date: date,
+                    parents: fields[5].split(whereSeparator: \.isWhitespace).map(String.init),
+                    refs: fields[6].split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) },
+                    lane: 0
+                )
+            }
+        }
+
         let output = try git.output(in: repositoryURL, [
             "log", "--all", "--topo-order", "-n", "100", "--date=iso-strict", "--pretty=format:\(format)"
         ])
-        let parsedCommits = try Self.records(output).map { record in
-            let fields = Self.fields(record)
-            guard fields.count >= 7, let date = Self.date(from: fields[4]) else { throw Self.parseError(record) }
-            return CommitSnapshot(
-                fullHash: fields[0],
-                shortHash: fields[1],
-                subject: fields[2],
-                author: fields[3],
-                date: date,
-                parents: fields[5].split(whereSeparator: \.isWhitespace).map(String.init),
-                refs: fields[6].split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) },
-                lane: 0
-            )
+        var parsedCommits = try parseCommits(output)
+        let branchTips = try git.output(in: repositoryURL, [
+            "for-each-ref", "--format=%(objectname)", "refs/heads"
+        ]).split(whereSeparator: \.isWhitespace).map(String.init)
+        let includedHashes = Set(parsedCommits.map(\.fullHash))
+        let missingTips = branchTips.filter { !includedHashes.contains($0) }
+        if !missingTips.isEmpty {
+            let tipOutput = try git.output(in: repositoryURL, [
+                "log", "--no-walk", "--date=iso-strict", "--pretty=format:\(format)"
+            ] + missingTips)
+            parsedCommits.append(contentsOf: try parseCommits(tipOutput))
         }
 
         var activeLanes: [String] = []
