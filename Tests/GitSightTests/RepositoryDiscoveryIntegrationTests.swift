@@ -50,6 +50,11 @@ enum RepositoryDiscoveryIntegrationTests {
             "discovery finds nested and linked repositories while skipping excluded directories and nested repositories"
         )
         try expectEqual(progressUpdates.last?.fractionCompleted, 1, "discovery reports a complete progress bar")
+        try expectEqual(
+            zip(progressUpdates, progressUpdates.dropFirst()).allSatisfy { $0.fractionCompleted <= $1.fractionCompleted },
+            true,
+            "discovery progress never moves backwards as new directories are found"
+        )
         try expectEqual(progressUpdates.last?.discoveredRepositories, 3, "discovery progress reports every repository found")
         try expectEqual(progressUpdates.contains { $0.scannedDirectories > 0 }, true, "discovery reports visited directories")
     }
