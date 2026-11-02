@@ -31,6 +31,11 @@ func runGit(in repositoryURL: URL, _ arguments: [String], environment: [String: 
 enum RepositoryInspectorIntegrationTests {
     static func main() {
         var failures = 0
+        run(
+            name: "inspection never runs repository hooks",
+            GitSafetyIntegrationTests.testInspectionNeverRunsRepositoryHooks,
+            failures: &failures
+        )
         run(name: "inspector reports untracked files", testInspectorReportsUntrackedFilesInRepository, failures: &failures)
         run(
             name: "discovery finds nested repositories and linked worktrees",
