@@ -36,6 +36,11 @@ enum RepositoryInspectorIntegrationTests {
             GitSafetyIntegrationTests.testInspectionNeverRunsRepositoryHooks,
             failures: &failures
         )
+        run(
+            name: "gone upstream is not reported as zero divergence",
+            GitSafetyIntegrationTests.testGoneUpstreamIsNotReportedAsZeroDivergence,
+            failures: &failures
+        )
         run(name: "inspector reports untracked files", testInspectorReportsUntrackedFilesInRepository, failures: &failures)
         run(
             name: "discovery finds nested repositories and linked worktrees",
