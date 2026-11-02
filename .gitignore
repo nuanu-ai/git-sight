@@ -8,6 +8,8 @@ muter_tmp/
 _mutated/
 muter-mappings.json
 muter-report.*
+muter_logs/
+Artifacts/
 
 # Локальные материалы: UI-концепт, рабочие заметки и скиллы
 # не входят в публичный репозиторий

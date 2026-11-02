@@ -278,7 +278,6 @@ private struct RepositoryRow: View {
     let repository: RepositorySnapshot
 
     private var isSelected: Bool { model.selectedPath == repository.path }
-    private var isHovering: Bool { model.hoveredRepositoryPath == repository.path }
 
     var body: some View {
         Button(action: { model.select(repository) }) {
@@ -305,17 +304,16 @@ private struct RepositoryRow: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 7)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(isSelected ? Theme.selected : (isHovering ? Theme.hover : .clear))
+            .background(HoverBackground(isSelected: isSelected))
             .clipShape(RoundedRectangle(cornerRadius: 6))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .onHover { model.hoveredRepositoryPath = $0 ? repository.path : nil }
         .accessibilityLabel("\(repository.name), \(repository.severity.label), \(repository.shortSignal)")
     }
 }
 
-private struct RepositoryDetailView: View {
+struct RepositoryDetailView: View {
     @ObservedObject var model: WorkspaceModel
     let repository: RepositorySnapshot
 
@@ -380,7 +378,6 @@ private struct IssuePanel: View {
                     IssueSection(title: "Незакоммиченное") {
                         ForEach(dirtyWorktrees, id: \.path) { worktree in
                             IssueRow(
-                                model: model,
                                 identifier: "dirty-\(worktree.path.path)",
                                 systemImage: "pencil",
                                 title: worktree.isMain ? "основной чекаут" : worktree.name,
@@ -393,7 +390,6 @@ private struct IssuePanel: View {
                 } else if repository.dirtyFileCount > 0 {
                     IssueSection(title: "Незакоммиченное") {
                         IssueRow(
-                            model: model,
                             identifier: "dirty-main",
                             systemImage: "pencil",
                             title: "основной чекаут",
@@ -408,7 +404,6 @@ private struct IssuePanel: View {
                     IssueSection(title: "Ворктри · \(additionalWorktrees.count)") {
                         ForEach(additionalWorktrees, id: \.path) { worktree in
                             IssueRow(
-                                model: model,
                                 identifier: "worktree-\(worktree.path.path)",
                                 systemImage: "folder",
                                 title: worktree.name,
@@ -426,7 +421,6 @@ private struct IssuePanel: View {
                     IssueSection(title: "Ветки без ворктри · \(looseBranches.count)") {
                         ForEach(looseBranches, id: \.name) { branch in
                             IssueRow(
-                                model: model,
                                 identifier: "branch-\(branch.name)",
                                 systemImage: "arrow.triangle.branch",
                                 title: branch.name,
@@ -443,7 +437,6 @@ private struct IssuePanel: View {
                     IssueSection(title: "Стэши · \(repository.stashes.count)") {
                         ForEach(repository.stashes.sorted(by: { $0.date < $1.date }), id: \.name) { stash in
                             IssueRow(
-                                model: model,
                                 identifier: "stash-\(stash.name)",
                                 systemImage: "tray.full",
                                 title: stash.name,
@@ -505,7 +498,6 @@ private struct IssueSection<Content: View>: View {
 }
 
 private struct IssueRow: View {
-    @ObservedObject var model: WorkspaceModel
     let identifier: String
     let systemImage: String
     let title: String
@@ -514,39 +506,39 @@ private struct IssueRow: View {
     let date: Date?
     var monospacedTitle = false
 
-    private var isHovering: Bool { model.hoveredIssueID == identifier }
-
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(alignment: .top, spacing: 8) {
             Image(systemName: systemImage)
                 .font(.system(size: 11))
                 .foregroundStyle(Theme.tertiary)
                 .frame(width: 14)
-            Text(title)
-                .font(monospacedTitle ? .system(size: 11, design: .monospaced) : .system(size: 12.5, weight: .medium))
-                .lineLimit(1)
-                .layoutPriority(1)
-            if let branch {
-                Text(branch)
-                    .font(.system(size: 10.5, design: .monospaced))
-                    .foregroundStyle(Theme.tertiary)
-                    .lineLimit(1)
+                .padding(.top, 2)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(monospacedTitle ? .system(size: 11, design: .monospaced) : .system(size: 12.5, weight: .medium))
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    if let branch {
+                        Text(branch)
+                            .font(.system(size: 10.5, design: .monospaced))
+                            .foregroundStyle(Theme.tertiary)
+                    }
+                    Text(detail)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Theme.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 4)
+                    Text(RepositoryText.relative(date))
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Theme.tertiary)
+                        .fixedSize()
+                }
             }
-            Text(detail)
-                .font(.system(size: 11.5))
-                .foregroundStyle(Theme.secondary)
-                .lineLimit(1)
-            Spacer(minLength: 2)
-            Text(RepositoryText.relative(date))
-                .font(.system(size: 11.5))
-                .foregroundStyle(Theme.tertiary)
-                .lineLimit(1)
         }
         .padding(.horizontal, 8)
-        .padding(.vertical, 5)
-        .background(isHovering ? Theme.hover : .clear)
+        .padding(.vertical, 7)
+        .background(HoverBackground())
         .clipShape(RoundedRectangle(cornerRadius: 6))
-        .onHover { model.hoveredIssueID = $0 ? identifier : nil }
         .help([title, branch, detail].compactMap { $0 }.joined(separator: " · "))
     }
 }

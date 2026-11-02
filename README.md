@@ -4,9 +4,27 @@ A native macOS app that shows abandoned work across your git repositories: workt
 
 It only shows. Deciding what to do about it stays with you.
 
-## Status
+## Build and run
 
-Early development. There is no buildable app yet; the UI concept and design notes are kept outside the repository for now.
+Requires macOS 13 or later and a Swift toolchain.
+
+```sh
+swift run GitSight
+```
+
+Choose a folder and start the scan explicitly. The app never changes repository contents.
+
+Run the integration tests with:
+
+```sh
+swift run GitSightTests
+```
+
+Build a standalone app bundle in `Artifacts/GitSight.app`:
+
+```sh
+sh Scripts/package_app.sh
+```
 
 ## Contributing
 

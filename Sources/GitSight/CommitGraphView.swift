@@ -1,7 +1,6 @@
 import GitSightCore
 import SwiftUI
 
-private let commitRowHeight: CGFloat = 32
 private let laneSpacing: CGFloat = 18
 private let laneColors = [
     Color(.sRGB, red: 10 / 255, green: 132 / 255, blue: 1),
@@ -11,11 +10,11 @@ private let laneColors = [
     Color(.sRGB, red: 209 / 255, green: 91 / 255, blue: 180 / 255)
 ]
 
-private struct CommitDetailHeight: PreferenceKey {
-    static var defaultValue: CGFloat = 0
+private struct CommitRowCenters: PreferenceKey {
+    static var defaultValue: [String: CGFloat] = [:]
 
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
+    static func reduce(value: inout [String: CGFloat], nextValue: () -> [String: CGFloat]) {
+        value.merge(nextValue()) { _, new in new }
     }
 }
 
@@ -24,15 +23,12 @@ struct CommitGraphView: View {
     let repository: RepositorySnapshot
 
     private var commits: [CommitSnapshot] { repository.commits }
-    private var rowByHash: [String: Int] {
-        Dictionary(uniqueKeysWithValues: commits.enumerated().map { ($0.element.fullHash, $0.offset) })
+    private var commitByHash: [String: CommitSnapshot] {
+        Dictionary(uniqueKeysWithValues: commits.map { ($0.fullHash, $0) })
     }
     private var railWidth: CGFloat {
         let maximumLane = commits.map(\.lane).max() ?? 0
         return 32 + CGFloat(max(0, maximumLane)) * laneSpacing
-    }
-    private var contentHeight: CGFloat {
-        CGFloat(commits.count) * commitRowHeight + model.commitDetailHeight
     }
 
     var body: some View {
@@ -64,45 +60,41 @@ struct CommitGraphView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
-                    ZStack(alignment: .topLeading) {
-                        rails
-                        VStack(spacing: 0) {
-                            ForEach(commits, id: \.fullHash) { commit in
-                                CommitRow(
-                                    model: model,
-                                    commit: commit,
-                                    leadingPadding: railWidth + 10,
-                                    isExpanded: model.expandedCommitHash == commit.fullHash,
-                                    action: { model.toggleCommit(commit, in: repository) }
-                                )
-                                if model.expandedCommitHash == commit.fullHash {
-                                    CommitDetails(
-                                        model: model,
-                                        repository: repository,
-                                        commit: commit,
-                                        leadingPadding: railWidth + 10
-                                    )
-                                    .background(
-                                        GeometryReader { geometry in
-                                            Color.clear.preference(
-                                                key: CommitDetailHeight.self,
-                                                value: geometry.size.height
-                                            )
-                                        }
+                    VStack(spacing: 0) {
+                        ForEach(commits, id: \.fullHash) { commit in
+                            CommitRow(
+                                commit: commit,
+                                leadingPadding: railWidth + 10,
+                                isExpanded: model.expandedCommitHash == commit.fullHash,
+                                action: { model.toggleCommit(commit, in: repository) }
+                            )
+                            .background(
+                                GeometryReader { geometry in
+                                    Color.clear.preference(
+                                        key: CommitRowCenters.self,
+                                        value: [commit.fullHash: geometry.frame(in: .named("commitGraph")).midY]
                                     )
                                 }
+                            )
+                            if model.expandedCommitHash == commit.fullHash {
+                                CommitDetails(
+                                    model: model,
+                                    repository: repository,
+                                    commit: commit,
+                                    leadingPadding: railWidth + 10
+                                )
                             }
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .frame(height: contentHeight)
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .coordinateSpace(name: "commitGraph")
+                    .background(rails)
+                    .onPreferenceChange(CommitRowCenters.self, perform: model.updateCommitRowCenters)
                     .padding(.vertical, 4)
                 }
             }
         }
         .background(Theme.background)
-        .onPreferenceChange(CommitDetailHeight.self, perform: model.updateCommitDetailHeight)
     }
 
     private var divergence: String {
@@ -115,12 +107,12 @@ struct CommitGraphView: View {
     private var rails: some View {
         Canvas { context, _ in
             for edge in repository.edges {
-                guard let fromRow = rowByHash[edge.from],
-                      let toRow = rowByHash[edge.to] else { continue }
-                let fromCommit = commits[fromRow]
-                let toCommit = commits[toRow]
-                let start = CGPoint(x: laneX(fromCommit.lane), y: rowY(fromRow))
-                let end = CGPoint(x: laneX(toCommit.lane), y: rowY(toRow))
+                guard let fromCommit = commitByHash[edge.from],
+                      let toCommit = commitByHash[edge.to],
+                      let fromY = model.commitRowCenters[edge.from],
+                      let toY = model.commitRowCenters[edge.to] else { continue }
+                let start = CGPoint(x: laneX(fromCommit.lane), y: fromY)
+                let end = CGPoint(x: laneX(toCommit.lane), y: toY)
                 var path = Path()
                 path.move(to: start)
                 if start.x == end.x {
@@ -140,8 +132,9 @@ struct CommitGraphView: View {
                 )
             }
 
-            for (row, commit) in commits.enumerated() {
-                let center = CGPoint(x: laneX(commit.lane), y: rowY(row))
+            for commit in commits {
+                guard let centerY = model.commitRowCenters[commit.fullHash] else { continue }
+                let center = CGPoint(x: laneX(commit.lane), y: centerY)
                 let color = color(for: commit.lane)
                 if commit.parents.count > 1 || !commit.refs.isEmpty {
                     let outer = Path(ellipseIn: CGRect(x: center.x - 6.5, y: center.y - 6.5, width: 13, height: 13))
@@ -155,22 +148,11 @@ struct CommitGraphView: View {
                 }
             }
         }
-        .frame(width: railWidth, height: contentHeight)
         .allowsHitTesting(false)
     }
 
     private func laneX(_ lane: Int) -> CGFloat {
         16 + CGFloat(max(0, lane)) * laneSpacing
-    }
-
-    private func rowY(_ row: Int) -> CGFloat {
-        var y = CGFloat(row) * commitRowHeight + commitRowHeight / 2
-        if let expandedHash = model.expandedCommitHash,
-           let expandedRow = rowByHash[expandedHash],
-           row > expandedRow {
-            y += model.commitDetailHeight
-        }
-        return y
     }
 
     private func color(for lane: Int) -> Color {
@@ -179,13 +161,10 @@ struct CommitGraphView: View {
 }
 
 private struct CommitRow: View {
-    @ObservedObject var model: WorkspaceModel
     let commit: CommitSnapshot
     let leadingPadding: CGFloat
     let isExpanded: Bool
     let action: () -> Void
-
-    private var isHovering: Bool { model.hoveredCommitHash == commit.fullHash }
 
     var body: some View {
         Button(action: action) {
@@ -193,33 +172,21 @@ private struct CommitRow: View {
                 Text(commit.subject)
                     .font(.system(size: 12.5))
                     .foregroundStyle(Theme.text)
-                    .lineLimit(1)
-                    .layoutPriority(1)
-                if let ref = commit.refs.first {
-                    Text(ref)
-                        .font(.system(size: 10.5, design: .monospaced))
-                        .foregroundStyle(laneColors[max(0, commit.lane) % laneColors.count])
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 1)
-                        .background(laneColors[max(0, commit.lane) % laneColors.count].opacity(0.13))
-                        .clipShape(RoundedRectangle(cornerRadius: 5))
-                        .lineLimit(1)
-                }
-                Spacer(minLength: 4)
-                Text(commit.author)
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(Theme.tertiary)
-                    .lineLimit(1)
+                    .lineLimit(2)
+                    .truncationMode(.tail)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 Text(RepositoryText.relative(commit.date))
                     .font(.system(size: 11.5))
                     .foregroundStyle(Theme.tertiary)
                     .lineLimit(1)
+                    .fixedSize()
             }
             .padding(.leading, leadingPadding)
             .padding(.trailing, 10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(height: commitRowHeight)
-            .background(isExpanded ? Theme.selected : (isHovering ? Theme.hover : .clear))
+            .padding(.vertical, 4)
+            .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+            .background(HoverBackground(isSelected: isExpanded))
             .overlay(
                 RoundedRectangle(cornerRadius: 6)
                     .stroke(isExpanded ? Color.white.opacity(0.14) : .clear)
@@ -229,7 +196,6 @@ private struct CommitRow: View {
         }
         .buttonStyle(.plain)
         .padding(.horizontal, 6)
-        .onHover { model.hoveredCommitHash = $0 ? commit.fullHash : nil }
         .help("\(commit.shortHash) · \(commit.subject)")
         .accessibilityHint(isExpanded ? "Скрыть файлы коммита" : "Показать файлы коммита")
     }
@@ -262,7 +228,7 @@ private struct CommitDetails: View {
             .padding(.top, 8)
             .padding(.bottom, 6)
 
-            if commit.refs.count > 1 {
+            if !commit.refs.isEmpty {
                 Text(commit.refs.joined(separator: " · "))
                     .font(.system(size: 10.5, design: .monospaced))
                     .foregroundStyle(Theme.tertiary)

@@ -20,10 +20,7 @@ final class WorkspaceModel: ObservableObject {
     @Published private(set) var loadingCommitHash: String?
     @Published private(set) var commitFiles: [String: [CommitFileSnapshot]] = [:]
     @Published private(set) var commitErrorMessage: String?
-    @Published private(set) var commitDetailHeight: CGFloat = 0
-    @Published var hoveredRepositoryPath: URL?
-    @Published var hoveredCommitHash: String?
-    @Published var hoveredIssueID: String?
+    @Published private(set) var commitRowCenters: [String: CGFloat] = [:]
 
     private var scanTask: Task<Void, Never>?
     private var commitTask: Task<Void, Never>?
@@ -132,7 +129,6 @@ final class WorkspaceModel: ObservableObject {
     }
 
     func toggleCommit(_ commit: CommitSnapshot, in repository: RepositorySnapshot) {
-        commitDetailHeight = 0
         if expandedCommitHash == commit.fullHash {
             commitTask?.cancel()
             commitGeneration += 1
@@ -197,9 +193,9 @@ final class WorkspaceModel: ObservableObject {
         }
     }
 
-    func updateCommitDetailHeight(_ height: CGFloat) {
-        guard commitDetailHeight != height else { return }
-        commitDetailHeight = height
+    func updateCommitRowCenters(_ centers: [String: CGFloat]) {
+        guard commitRowCenters != centers else { return }
+        commitRowCenters = centers
     }
 
     private func clearCommitExpansion() {
@@ -209,6 +205,6 @@ final class WorkspaceModel: ObservableObject {
         loadingCommitHash = nil
         commitFiles = [:]
         commitErrorMessage = nil
-        commitDetailHeight = 0
+        commitRowCenters = [:]
     }
 }

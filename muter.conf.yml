@@ -1,0 +1,7 @@
+arguments:
+- run
+- GitSightTests
+executable: /usr/bin/swift
+exclude:
+- Package.swift
+excludeCalls: []
