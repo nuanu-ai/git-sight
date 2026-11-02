@@ -48,8 +48,8 @@ enum RepositoryInspectorIntegrationTests {
         )
         run(name: "inspector reports untracked files", testInspectorReportsUntrackedFilesInRepository, failures: &failures)
         run(
-            name: "discovery finds nested repositories and linked worktrees",
-            RepositoryDiscoveryIntegrationTests.testFindsNestedRepositoriesAndLinkedWorktrees,
+            name: "linked worktrees report through their main repository",
+            RepositoryDiscoveryIntegrationTests.testLinkedWorktreesReportThroughTheirMainRepository,
             failures: &failures
         )
         run(

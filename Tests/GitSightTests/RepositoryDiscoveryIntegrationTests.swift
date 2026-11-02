@@ -2,7 +2,7 @@ import Foundation
 import GitSightCore
 
 enum RepositoryDiscoveryIntegrationTests {
-    static func testFindsNestedRepositoriesAndLinkedWorktrees() throws {
+    static func testLinkedWorktreesReportThroughTheirMainRepository() throws {
         let fileManager = FileManager.default
         let projectRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -28,6 +28,15 @@ enum RepositoryDiscoveryIntegrationTests {
         let linkedURL = projectsURL.appendingPathComponent("linked", isDirectory: true)
         try runGit(in: alphaURL, ["worktree", "add", linkedURL.path])
 
+        // Discovery skips hidden directories, so this repository is reachable only through its linked worktree.
+        let omegaURL = rootURL.appendingPathComponent(".hidden/omega", isDirectory: true)
+        try fileManager.createDirectory(at: omegaURL, withIntermediateDirectories: true)
+        try runGit(in: omegaURL, ["init"])
+        try runGit(in: omegaURL, ["config", "user.name", "Test User"])
+        try runGit(in: omegaURL, ["config", "user.email", "test@example.com"])
+        try runGit(in: omegaURL, ["commit", "--allow-empty", "-m", "Initial"])
+        try runGit(in: omegaURL, ["worktree", "add", projectsURL.appendingPathComponent("omega-linked").path])
+
         for relativePath in [
             "Projects/beta",
             "Projects/alpha/nested",
@@ -46,8 +55,8 @@ enum RepositoryDiscoveryIntegrationTests {
         let relativePaths = repositoryURLs.map { $0.path.replacingOccurrences(of: rootURL.path + "/", with: "") }
         try expectEqual(
             relativePaths,
-            ["Projects/alpha", "Projects/beta", "Projects/linked"],
-            "discovery finds nested and linked repositories while skipping excluded directories and nested repositories"
+            [".hidden/omega", "Projects/alpha", "Projects/beta"],
+            "linked worktrees report through their main repository, once, while excluded and nested directories are skipped"
         )
         try expectEqual(progressUpdates.last?.fractionCompleted, 1, "discovery reports a complete progress bar")
         try expectEqual(
