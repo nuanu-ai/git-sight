@@ -41,7 +41,28 @@ public struct RepositoryInspector {
     }
 
     public func changedFiles(in repositoryURL: URL, commit: CommitSnapshot) throws -> [CommitFileSnapshot] {
-        []
+        let result = try git.run(in: repositoryURL, [
+            "diff-tree", "--no-commit-id", "--name-status", "-r", "--root", "--no-renames",
+            "--format=", "-z", commit.fullHash
+        ])
+        guard result.status == 0 else {
+            throw NSError(
+                domain: "GitSight.RepositoryInspector",
+                code: Int(result.status),
+                userInfo: [NSLocalizedDescriptionKey: result.standardError]
+            )
+        }
+        let fields = result.standardOutput.split(separator: 0)
+        var files: [CommitFileSnapshot] = []
+        var index = 0
+        while index + 1 < fields.count {
+            files.append(CommitFileSnapshot(
+                status: String(decoding: fields[index], as: UTF8.self),
+                path: String(decoding: fields[index + 1], as: UTF8.self)
+            ))
+            index += 2
+        }
+        return files
     }
 
     private func dirtyFiles(in repositoryURL: URL) throws -> Int {
