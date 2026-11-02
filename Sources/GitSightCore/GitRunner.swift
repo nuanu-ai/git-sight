@@ -15,16 +15,31 @@ struct GitRunner {
         process.arguments = ["--no-optional-locks", "-C", repositoryURL.path] + arguments
         process.standardOutput = outputPipe
         process.standardError = errorPipe
-        process.environment = ProcessInfo.processInfo.environment.merging([
+        var environment = ProcessInfo.processInfo.environment.filter { !$0.key.hasPrefix("GIT_") }
+        environment.merge([
             "GIT_OPTIONAL_LOCKS": "0",
             "LC_ALL": "C",
             "LANG": "C"
         ]) { _, new in new }
+        process.environment = environment
 
         try process.run()
-        let output = outputPipe.fileHandleForReading.readDataToEndOfFile()
-        let error = errorPipe.fileHandleForReading.readDataToEndOfFile()
+        let group = DispatchGroup()
+        let queue = DispatchQueue(label: "GitSight.GitRunner.pipe", attributes: .concurrent)
+        var output = Data()
+        var error = Data()
+        group.enter()
+        queue.async {
+            output = outputPipe.fileHandleForReading.readDataToEndOfFile()
+            group.leave()
+        }
+        group.enter()
+        queue.async {
+            error = errorPipe.fileHandleForReading.readDataToEndOfFile()
+            group.leave()
+        }
         process.waitUntilExit()
+        group.wait()
         return GitResult(
             status: process.terminationStatus,
             standardOutput: output,
