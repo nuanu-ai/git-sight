@@ -1,537 +1,579 @@
+import AppKit
 import GitSightCore
 import SwiftUI
 
-enum Theme {
-    static let background = Color(.sRGB, red: 23 / 255, green: 24 / 255, blue: 28 / 255)
-    static let raised = Color(.sRGB, red: 30 / 255, green: 31 / 255, blue: 37 / 255)
-    static let hover = Color.white.opacity(0.045)
-    static let selected = Color.white.opacity(0.07)
-    static let border = Color.white.opacity(0.07)
-    static let text = Color(.sRGB, red: 236 / 255, green: 236 / 255, blue: 239 / 255)
-    static let secondary = Color(.sRGB, red: 162 / 255, green: 164 / 255, blue: 172 / 255)
-    static let tertiary = Color(.sRGB, red: 147 / 255, green: 149 / 255, blue: 159 / 255)
-    static let accent = Color(.sRGB, red: 10 / 255, green: 132 / 255, blue: 255 / 255)
-}
-
-extension Severity {
-    var color: Color {
-        switch self {
-        case .clean: return Color(.sRGB, red: 49 / 255, green: 209 / 255, blue: 88 / 255)
-        case .attention: return Color(.sRGB, red: 255 / 255, green: 214 / 255, blue: 10 / 255)
-        case .warning: return Color(.sRGB, red: 255 / 255, green: 160 / 255, blue: 10 / 255)
-        case .critical: return Color(.sRGB, red: 255 / 255, green: 69 / 255, blue: 58 / 255)
-        }
-    }
-
-    var label: String {
-        switch self {
-        case .clean: return "чисто"
-        case .attention: return "в работе"
-        case .warning: return "заброшено"
-        case .critical: return "забыто"
-        }
-    }
-}
-
 struct MainWindowView: View {
-    @ObservedObject var model: WorkspaceModel
+    @Bindable var model: WorkspaceModel
 
     var body: some View {
-        VStack(spacing: 0) {
-            toolbar
-            Divider().overlay(Theme.border)
-            HStack(spacing: 0) {
-                RepositorySidebar(model: model)
-                    .frame(width: 264)
-                Divider().overlay(Theme.border)
-                detail
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Theme.background)
+        Group {
+            if model.repositories.isEmpty {
+                WorkspaceStateView(model: model)
+                    .frame(minWidth: 640, minHeight: 420)
+            } else {
+                NavigationSplitView {
+                    RepositorySidebar(model: model)
+                        .navigationSplitViewColumnWidth(min: 220, ideal: 280, max: 420)
+                } content: {
+                    FindingList(model: model)
+                        .navigationSplitViewColumnWidth(min: 280, ideal: 360, max: 560)
+                } detail: {
+                    FindingDetail(model: model)
+                }
+                .searchable(text: $model.filter, placement: .sidebar, prompt: "Репозиторий или ветка")
+                // The window shows the split view's title, not the content column's.
+                .navigationTitle(model.selectedRepository?.name ?? "git-sight")
+                .navigationSubtitle(model.selectedRepository.map { RepositoryText.path($0.path) } ?? "")
+                .frame(minWidth: 900, minHeight: 520)
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Button(action: model.chooseRoot) {
+                    Label(model.rootURL.map { RepositoryText.path($0) } ?? "Выбрать папку", systemImage: "folder")
+                        .labelStyle(.titleAndIcon)
+                }
+                .help("Папка, в которой искать репозитории (⌘O)")
+            }
+            ToolbarItem(placement: .primaryAction) {
+                if model.isScanning, !model.repositories.isEmpty {
+                    ProgressView(value: model.scanProgress?.fractionCompleted ?? 0)
+                        .progressViewStyle(.circular)
+                        .controlSize(.small)
+                        .help("Сканирование…")
+                } else {
+                    Button(action: model.scan) {
+                        Label("Обновить", systemImage: "arrow.clockwise")
+                    }
+                    .disabled(model.rootURL == nil || model.isScanning)
+                    .help("Просканировать заново (⌘R)")
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Empty, first scan and error states
+
+private struct WorkspaceStateView: View {
+    let model: WorkspaceModel
+
+    var body: some View {
+        if model.isScanning {
+            VStack(spacing: 12) {
+                ProgressView(value: model.scanProgress?.fractionCompleted ?? 0)
+                    .frame(width: 280)
+                Text(status)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                Button("Остановить", action: model.cancelScan)
+                    .controlSize(.small)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .frame(minWidth: 900, idealWidth: 1180, minHeight: 600, idealHeight: 760)
-        .background(Theme.raised)
-        .preferredColorScheme(.dark)
-    }
-
-    private var toolbar: some View {
-        HStack(spacing: 10) {
-            Text("git-sight")
-                .font(.system(size: 13.5, weight: .semibold))
-            Text("·")
-                .foregroundStyle(Theme.tertiary)
-            Button(action: model.chooseRoot) {
-                HStack(spacing: 5) {
-                    Image(systemName: "folder")
-                    Text(rootTitle)
-                        .font(.system(size: 11, design: .monospaced))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 9))
-                }
-                .foregroundStyle(Theme.secondary)
-                .padding(.horizontal, 7)
-                .padding(.vertical, 4)
-                .contentShape(Rectangle())
+        } else if model.rootURL == nil {
+            ContentUnavailableView {
+                Label("Где искать репозитории?", systemImage: "folder.badge.questionmark")
+            } description: {
+                Text("git-sight найдёт все git-репозитории в папке и покажет работу, которой нет на сервере. Он только читает и ничего не меняет.")
+            } actions: {
+                Button("Выбрать папку…", action: model.chooseRoot)
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
             }
-            .buttonStyle(.plain)
-            .help("Выбрать папку для поиска репозиториев")
-
-            Spacer(minLength: 12)
-
-            if model.isScanning {
-                ProgressView(value: model.scanProgress?.fractionCompleted ?? 0)
-                    .frame(width: 110)
-                Text("Сканируем…")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.tertiary)
-            } else if let lastScanDate = model.lastScanDate {
-                Text("Обновлено \(lastScanDate.formatted(date: .omitted, time: .shortened))")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.tertiary)
-                if !model.scanFailures.isEmpty {
-                    Label("Пропущено: \(model.scanFailures.count)", systemImage: "exclamationmark.triangle")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Severity.warning.color)
-                        .help(model.scanFailures.map { "\($0.path.path): \($0.message)" }.joined(separator: "\n\n"))
-                }
-            }
-            Button(action: model.isScanning ? model.cancelScan : model.scan) {
-                Image(systemName: model.isScanning ? "xmark" : "arrow.clockwise")
-                    .frame(width: 28, height: 28)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .keyboardShortcut("r", modifiers: .command)
-            .help(model.isScanning ? "Остановить сканирование" : "Сканировать локальные репозитории заново")
-
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(Theme.tertiary)
-                TextField("Фильтр", text: $model.filter)
-                    .textFieldStyle(.plain)
-            }
-            .font(.system(size: 12))
-            .padding(.horizontal, 9)
-            .padding(.vertical, 5)
-            .frame(width: 170)
-            .background(Theme.raised)
-            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.border))
-        }
-        .padding(.leading, 84)
-        .padding(.trailing, 14)
-        .frame(height: 50)
-        .background(Theme.raised)
-    }
-
-    private var rootTitle: String {
-        if model.rootURL == FileManager.default.homeDirectoryForCurrentUser {
-            return "~ (домашний каталог)"
-        }
-        return RepositoryText.path(model.rootURL)
-    }
-
-    @ViewBuilder
-    private var detail: some View {
-        if model.isScanning {
-            ScanInProgressView(model: model)
         } else if let errorMessage = model.errorMessage {
-            WorkspaceStateView(
-                systemImage: "exclamationmark.triangle",
-                title: "Сканирование не началось",
-                message: errorMessage,
-                actionTitle: "Повторить",
-                action: model.scan
-            )
-        } else if let repository = model.selectedRepository {
-            RepositoryDetailView(model: model, repository: repository)
-        } else if !model.hasStartedScan {
-            FirstScanView(model: model)
-        } else {
-            WorkspaceStateView(
-                systemImage: "folder",
-                title: "Сканирование завершено",
-                message: model.scanFailures.first?.message ?? "В выбранной папке репозитории не найдены.",
-                actionTitle: "Начать заново",
-                action: model.scan
-            )
-        }
-    }
-}
-
-private struct FirstScanView: View {
-    @ObservedObject var model: WorkspaceModel
-
-    var body: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "folder.badge.magnifyingglass")
-                .font(.system(size: 28, weight: .light))
-                .foregroundStyle(Theme.secondary)
-            Text("Где искать репозитории?")
-                .font(.system(size: 17, weight: .semibold))
-            Button(action: model.chooseRoot) {
-                HStack(spacing: 6) {
-                    Image(systemName: "folder")
-                    Text(RepositoryText.path(model.rootURL))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 9))
-                }
-                .frame(maxWidth: 460)
+            ContentUnavailableView {
+                Label("Не удалось просканировать папку", systemImage: "exclamationmark.triangle")
+            } description: {
+                Text(errorMessage)
+            } actions: {
+                Button("Повторить", action: model.scan)
+                Button("Выбрать другую папку…", action: model.chooseRoot)
             }
-            .buttonStyle(.link)
-            Button("Начать сканирование", action: model.scan)
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .keyboardShortcut(.return)
-            Text("Сканирование только читает Git-метаданные.")
-                .font(.system(size: 12))
-                .foregroundStyle(Theme.tertiary)
+        } else if model.scanStopped {
+            ContentUnavailableView {
+                Label("Сканирование остановлено", systemImage: "stop.circle")
+            } description: {
+                Text("Результатов пока нет.")
+            } actions: {
+                Button("Сканировать", action: model.scan)
+                Button("Выбрать другую папку…", action: model.chooseRoot)
+            }
+        } else if model.lastScanDate != nil {
+            ContentUnavailableView {
+                Label("Репозиториев не найдено", systemImage: "folder")
+            } description: {
+                Text("В \(model.rootURL.map { RepositoryText.path($0) } ?? "папке") нет git-репозиториев. Скрытые папки, Library и node_modules пропускаются.")
+            } actions: {
+                Button("Выбрать другую папку…", action: model.chooseRoot)
+            }
+        } else {
+            Color.clear
         }
-        .padding(32)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
-}
-
-private struct ScanInProgressView: View {
-    @ObservedObject var model: WorkspaceModel
 
     private var status: String {
-        guard let progress = model.scanProgress else { return "Подготавливаем сканирование" }
+        guard let progress = model.scanProgress else { return "Ищем репозитории…" }
         switch progress.phase {
         case .discovery:
-            return "Каталогов: \(progress.scannedDirectories) · репозиториев найдено: \(progress.totalRepositories)"
+            return "Ищем репозитории: просмотрено папок \(progress.scannedDirectories)"
         case .inspection:
-            return "Проверка репозитория \(progress.processedRepositories) из \(progress.totalRepositories)"
+            return "Проверяем репозитории: \(progress.processedRepositories) из \(progress.totalRepositories)"
         }
-    }
-
-    var body: some View {
-        VStack(spacing: 16) {
-            Text("Сканируем репозитории")
-                .font(.system(size: 16, weight: .semibold))
-            ProgressView(value: model.scanProgress?.fractionCompleted ?? 0) {
-                Text(status)
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(Theme.secondary)
-            }
-            .frame(maxWidth: 440)
-            Text(RepositoryText.path(model.rootURL))
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(Theme.tertiary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .frame(maxWidth: 440)
-            Button("Остановить", role: .cancel, action: model.cancelScan)
-        }
-        .padding(32)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
+// MARK: - Sidebar
+
 private struct RepositorySidebar: View {
-    @ObservedObject var model: WorkspaceModel
+    @Bindable var model: WorkspaceModel
+    @AppStorage("showsCleanRepositories") private var showsClean = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 6) {
-                Text(RepositoryText.repositories(model.repositories.count))
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Theme.secondary)
-                if !model.repositories.isEmpty {
-                    let abandonedCount = model.repositories.filter { $0.severity >= .warning }.count
-                    Text("· заброшено в \(abandonedCount)")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Theme.tertiary)
+        let repositories = model.filteredRepositories
+        List(selection: $model.selectedPath) {
+            ForEach([Severity.critical, .warning, .attention], id: \.self) { severity in
+                let group = repositories.filter { $0.severity == severity }
+                if !group.isEmpty {
+                    Section("\(severity.title) · \(group.count)") {
+                        ForEach(group, id: \.path) { repository in
+                            RepositoryRow(repository: repository)
+                        }
+                    }
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.top, 12)
-            .padding(.bottom, 8)
-
-            ScrollView {
-                LazyVStack(spacing: 1) {
-                    ForEach(model.filteredRepositories, id: \.path) { repository in
-                        RepositoryRow(model: model, repository: repository)
+            let clean = repositories.filter { $0.severity == .clean }
+            if !clean.isEmpty {
+                Section(isExpanded: $showsClean) {
+                    ForEach(clean, id: \.path) { repository in
+                        RepositoryRow(repository: repository)
                     }
-                    if model.filteredRepositories.isEmpty && !model.isScanning {
-                        Text(model.repositories.isEmpty ? "Нет репозиториев" : "Ничего не найдено")
-                            .font(.system(size: 12))
-                            .foregroundStyle(Theme.tertiary)
-                            .frame(maxWidth: .infinity, alignment: .center)
-                            .padding(.top, 28)
-                    }
+                } header: {
+                    Text("\(Severity.clean.title) · \(clean.count)")
                 }
-                .padding(.horizontal, 8)
-                .padding(.bottom, 8)
             }
         }
-        .background(Theme.raised)
+        .listStyle(.sidebar)
+        .overlay {
+            if repositories.isEmpty {
+                ContentUnavailableView.search(text: model.filter)
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            SidebarFooter(model: model)
+        }
     }
 }
 
 private struct RepositoryRow: View {
-    @ObservedObject var model: WorkspaceModel
     let repository: RepositorySnapshot
 
-    private var isSelected: Bool { model.selectedPath == repository.path }
-
     var body: some View {
-        Button(action: { model.select(repository) }) {
-            HStack(spacing: 9) {
-                Circle()
-                    .fill(repository.severity.color)
-                    .frame(width: 8, height: 8)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(repository.name)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(isSelected ? Theme.text : Theme.secondary)
-                        .lineLimit(1)
-                    Text(repository.shortSignal)
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(Theme.tertiary)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer(minLength: 4)
-                Text(repository.statusLabel)
-                    .font(.system(size: 11.5, weight: .medium))
-                    .foregroundStyle(repository.severity.color)
+        HStack(spacing: 8) {
+            Circle()
+                .fill(repository.severity.color)
+                .frame(width: 7, height: 7)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(repository.name)
+                    .lineLimit(1)
+                Text(repository.summary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 7)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(HoverBackground(isSelected: isSelected))
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-            .contentShape(Rectangle())
+            Spacer(minLength: 4)
+            if let oldest = repository.oldestUnsavedWork {
+                Text(RepositoryText.age(oldest, short: true))
+                    .font(.caption)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(repository.name), \(repository.statusLabel), \(repository.shortSignal)")
+        .padding(.vertical, 2)
+        .tag(repository.path)
+        .help(RepositoryText.path(repository.path))
+        .contextMenu { RepositoryActions(repository: repository) }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(repository.name), \(repository.severity.title), \(repository.summary)")
     }
 }
 
-struct RepositoryDetailView: View {
-    @ObservedObject var model: WorkspaceModel
+private struct RepositoryActions: View {
     let repository: RepositorySnapshot
+
+    var body: some View {
+        Button("Показать в Finder") { Workspace.reveal(repository.path) }
+        Button("Открыть в Терминале") { Workspace.openTerminal(at: repository.path) }
+        if let remote = repository.remoteWebURL {
+            Button("Открыть \(remote.host ?? "remote")") { NSWorkspace.shared.open(remote) }
+        }
+        Divider()
+        Button("Скопировать путь") { Workspace.copy(repository.path.path) }
+    }
+}
+
+private struct SidebarFooter: View {
+    @Bindable var model: WorkspaceModel
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if let lastScanDate = model.lastScanDate {
+                Text("Обновлено \(lastScanDate.formatted(date: .omitted, time: .shortened))")
+            }
+            if let errorMessage = model.errorMessage {
+                // The list above is from the last scan that worked.
+                Label("Не удалось обновить", systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(.orange)
+                    .help(errorMessage)
+            }
+            Spacer()
+            if !model.scanFailures.isEmpty {
+                Button {
+                    model.showsScanFailures.toggle()
+                } label: {
+                    Label("Не прочитано: \(model.scanFailures.count)", systemImage: "exclamationmark.triangle")
+                }
+                .buttonStyle(.borderless)
+                .popover(isPresented: $model.showsScanFailures) {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 10) {
+                            ForEach(model.scanFailures, id: \.path) { failure in
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(RepositoryText.path(failure.path)).font(.callout.weight(.medium))
+                                    Text(failure.message).font(.caption).foregroundStyle(.secondary)
+                                }
+                                .textSelection(.enabled)
+                            }
+                        }
+                        .padding(14)
+                    }
+                    .frame(width: 420, height: 260)
+                }
+            }
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+    }
+}
+
+// MARK: - Findings of one repository
+
+private struct FindingList: View {
+    @Bindable var model: WorkspaceModel
+
+    var body: some View {
+        if let repository = model.selectedRepository {
+            let findings = repository.findings
+            Group {
+                if findings.isEmpty {
+                    ContentUnavailableView {
+                        Label(
+                            repository.hasRemote ? "Всё на сервере" : "Нет remote",
+                            systemImage: repository.hasRemote ? "checkmark.circle" : "externaldrive"
+                        )
+                    } description: {
+                        Text(repository.hasRemote
+                             ? "Здесь нет работы, которой не было бы на сервере."
+                             : "У репозитория нет remote, вся история есть только на этом компьютере.")
+                    }
+                } else {
+                    List(selection: $model.selectedFindingID) {
+                        section("Не закоммичено", findings.filter { $0.kind == .uncommitted })
+                        section("Нет на сервере", findings.filter { $0.kind == .branch || $0.kind == .detached })
+                        section("Стэши", findings.filter { $0.kind == .stash })
+                        if !repository.hasRemote {
+                            Section {
+                                Label("Нет remote: вся история есть только на этом компьютере.", systemImage: "externaldrive")
+                                    .font(.callout)
+                                    .foregroundStyle(.secondary)
+                                    .selectionDisabled()
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            ContentUnavailableView("Выберите репозиторий", systemImage: "sidebar.left")
+        }
+    }
+
+    @ViewBuilder
+    private func section(_ title: String, _ findings: [Finding]) -> some View {
+        if !findings.isEmpty {
+            Section(title) {
+                ForEach(findings) { finding in
+                    FindingRow(finding: finding)
+                        .tag(finding.id)
+                }
+            }
+        }
+    }
+}
+
+private struct FindingRow: View {
+    let finding: Finding
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: finding.systemImage)
+                .foregroundStyle(.secondary)
+                .frame(width: 16)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                // Stash messages are prose; two lines keep them readable at the default width.
+                Text(finding.title)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+                Text([finding.detail, finding.note].compactMap { $0 }.joined(separator: " · "))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            Spacer(minLength: 4)
+            Text(RepositoryText.age(finding.date, short: true))
+                .font(.caption)
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 2)
+        .help([finding.title, finding.detail, finding.note].compactMap { $0 }.joined(separator: "\n"))
+    }
+}
+
+// MARK: - Detail of one finding
+
+private struct FindingDetail: View {
+    @Bindable var model: WorkspaceModel
+
+    var body: some View {
+        if let finding = model.selectedFinding {
+            VStack(spacing: 0) {
+                FindingHeader(model: model, finding: finding)
+                Divider()
+                content
+            }
+        } else {
+            Color.clear
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if let error = model.findingError {
+            ContentUnavailableView("Не удалось прочитать", systemImage: "exclamationmark.triangle", description: Text(error))
+        } else {
+            switch model.findingContent {
+            case .history(let commits):
+                VSplitView {
+                    CommitGraph(
+                        commits: commits,
+                        // A detached HEAD's range also stops at local branches and tags.
+                        boundaryLabel: model.selectedFinding?.kind == .detached ? "Уже в ветке или на сервере" : "На сервере",
+                        selection: $model.selectedCommitHash
+                    )
+                        .frame(minHeight: 160)
+                    if let commit = commits.first(where: { $0.fullHash == model.selectedCommitHash }) {
+                        CommitFilesPane(commit: commit, files: model.commitFiles, error: model.commitFilesError)
+                            .frame(minHeight: 120, idealHeight: 220)
+                    }
+                }
+            case .files(let files):
+                FileList(files: files)
+            case nil:
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+    }
+}
+
+private struct FindingHeader: View {
+    let model: WorkspaceModel
+    let finding: Finding
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(finding.title)
+                .font(.title3.weight(.semibold))
+                .lineLimit(2)
+                .textSelection(.enabled)
+            Text(facts)
+                .foregroundStyle(.secondary)
+            Text(RepositoryText.path(finding.location))
+                .font(.callout.monospaced())
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .textSelection(.enabled)
+            // As the column narrows, labels shorten step by step instead of truncating.
+            ViewThatFits(in: .horizontal) {
+                actions(shortPrimary: false, iconsOnly: false)
+                actions(shortPrimary: false, iconsOnly: true)
+                actions(shortPrimary: true, iconsOnly: true)
+            }
+            .padding(.top, 6)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func actions(shortPrimary: Bool, iconsOnly: Bool) -> some View {
+        HStack(spacing: 8) {
+            let copied = model.copiedFindingID == finding.id
+            Button {
+                model.copyAgentTask(for: finding)
+            } label: {
+                Label(copied ? "Скопировано" : (shortPrimary ? "Задача для агента" : "Скопировать задачу для агента"),
+                      systemImage: copied ? "checkmark" : "doc.on.clipboard")
+            }
+            .buttonStyle(.borderedProminent)
+            .help("Текст, который можно вставить агенту: что найдено, где и что с этим сделать")
+            secondary("Показать в Finder", systemImage: "folder", iconOnly: iconsOnly) {
+                Workspace.reveal(finding.location)
+            }
+            secondary("Открыть в Терминале", systemImage: "terminal", iconOnly: iconsOnly) {
+                Workspace.openTerminal(at: finding.location)
+            }
+        }
+        .fixedSize()
+    }
+
+    private func secondary(_ title: String, systemImage: String, iconOnly: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            if iconOnly {
+                Image(systemName: systemImage).accessibilityLabel(title)
+            } else {
+                Text(title)
+            }
+        }
+        .help(title)
+    }
+
+    private var facts: String {
+        var parts = [finding.detail]
+        if let date = finding.date {
+            parts.append(RepositoryText.ago(date))
+        }
+        if let note = finding.note { parts.append(note) }
+        return parts.joined(separator: " · ")
+    }
+}
+
+// MARK: - Files
+
+private struct FileList: View {
+    let files: [CommitFileSnapshot]
+
+    var body: some View {
+        if files.isEmpty {
+            ContentUnavailableView("Файлов нет", systemImage: "doc")
+        } else {
+            List(files, id: \.path) { file in
+                FileRow(file: file)
+            }
+        }
+    }
+}
+
+private struct FileRow: View {
+    let file: CommitFileSnapshot
+
+    var body: some View {
+        let path = file.path as NSString
+        HStack(spacing: 8) {
+            Text(file.status)
+                .font(.callout.monospaced().weight(.semibold))
+                .foregroundStyle(statusColor)
+                .frame(width: 14)
+                .help(statusName)
+            Text(path.lastPathComponent)
+                .lineLimit(1)
+            Text(path.deletingLastPathComponent)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 0)
+        }
+        .help(file.path)
+    }
+
+    private var statusColor: Color {
+        switch file.status.prefix(1) {
+        case "A", "?": return .green
+        case "D": return .red
+        case "R", "C": return .blue
+        default: return .orange
+        }
+    }
+
+    private var statusName: String {
+        switch file.status.prefix(1) {
+        case "A": return "Добавлен"
+        case "?": return "Новый, не добавлен в git"
+        case "D": return "Удалён"
+        case "R": return "Переименован"
+        default: return "Изменён"
+        }
+    }
+}
+
+private struct CommitFilesPane: View {
+    let commit: CommitSnapshot
+    let files: [CommitFileSnapshot]?
+    let error: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Text(repository.name)
-                        .font(.system(size: 15, weight: .semibold))
-                    Text(RepositoryText.path(repository.path))
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(Theme.tertiary)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 8)
-                    Text(repository.statusLabel)
-                        .font(.system(size: 11.5, weight: .medium))
-                        .foregroundStyle(repository.severity.color)
-                }
-                Text(repository.fullReason)
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(Theme.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(.horizontal, 18)
-            .padding(.top, 13)
-            .padding(.bottom, 11)
-            Divider().overlay(Theme.border)
-            IssuePanel(model: model, repository: repository)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-    }
-}
-
-private struct IssuePanel: View {
-    @ObservedObject var model: WorkspaceModel
-    let repository: RepositorySnapshot
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                let dirtyWorktrees = repository.dirtyWorktrees
-                    .sorted { ($0.dirtyModifiedAt ?? .distantFuture) < ($1.dirtyModifiedAt ?? .distantFuture) }
-                if !dirtyWorktrees.isEmpty {
-                    IssueSection(title: "Не закоммичено") {
-                        ForEach(dirtyWorktrees, id: \.path) { worktree in
-                            IssueRow(
-                                identifier: "dirty-\(worktree.path.path)",
-                                systemImage: "pencil",
-                                title: worktree.isMain ? "основной чекаут" : worktree.name,
-                                branch: worktree.branch,
-                                detail: RepositoryText.files(worktree.dirtyFileCount),
-                                date: worktree.dirtyModifiedAt ?? worktree.lastActivity
-                            )
-                        }
-                    }
-                }
-
-                let unpushedBranches = repository.unpushedBranches
-                    .sorted { ($0.lastCommitDate ?? .distantFuture) < ($1.lastCommitDate ?? .distantFuture) }
-                if !unpushedBranches.isEmpty || !repository.detachedWorktrees.isEmpty {
-                    IssueSection(title: "Нет на сервере") {
-                        ForEach(unpushedBranches, id: \.name) { branch in
-                            IssueRow(
-                                identifier: "branch-\(branch.name)",
-                                systemImage: "arrow.triangle.branch",
-                                title: branch.name,
-                                branch: nil,
-                                detail: RepositoryText.commits(branch.unpushedCommits),
-                                date: branch.lastCommitDate,
-                                monospacedTitle: true
-                            )
-                        }
-                        ForEach(repository.detachedWorktrees, id: \.path) { worktree in
-                            IssueRow(
-                                identifier: "detached-\(worktree.path.path)",
-                                systemImage: "folder",
-                                title: worktree.name,
-                                branch: "detached HEAD",
-                                detail: RepositoryText.commits(worktree.unpushedCommits),
-                                date: worktree.lastActivity
-                            )
-                        }
-                    }
-                }
-
-                if !repository.stashes.isEmpty {
-                    IssueSection(title: "Стэши · \(repository.stashes.count)") {
-                        ForEach(repository.stashes.sorted(by: { $0.date < $1.date }), id: \.name) { stash in
-                            IssueRow(
-                                identifier: "stash-\(stash.name)",
-                                systemImage: "tray.full",
-                                title: stash.name,
-                                branch: nil,
-                                detail: stash.message,
-                                date: stash.date,
-                                monospacedTitle: true
-                            )
-                        }
-                    }
-                }
-
-                if !repository.hasRemote {
-                    Label("Нет remote: вся история есть только на этом компьютере.", systemImage: "externaldrive")
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(Theme.tertiary)
-                        .padding(.horizontal, 6)
-                        .padding(.top, 16)
-                } else if repository.severity == .clean {
-                    Label("Всё, что есть локально, есть и на сервере.", systemImage: "checkmark.circle")
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(Theme.tertiary)
-                        .padding(.horizontal, 6)
-                        .padding(.top, 16)
+            HStack(spacing: 8) {
+                Text(commit.shortHash)
+                    .font(.callout.monospaced())
+                    .textSelection(.enabled)
+                Text("\(commit.author) · \(RepositoryText.fullDate(commit.date))")
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer()
+                if let files {
+                    Text(RepositoryText.files(files.count))
+                        .foregroundStyle(.secondary)
                 }
             }
-            .padding(.horizontal, 10)
-            .padding(.top, 8)
-            .padding(.bottom, 24)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-}
-
-private struct IssueSection<Content: View>: View {
-    let title: String
-    @ViewBuilder let content: Content
-
-    var body: some View {
-        Text(title)
-            .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(Theme.tertiary)
-            .padding(.horizontal, 6)
-            .padding(.top, 12)
-            .padding(.bottom, 4)
-        content
-    }
-}
-
-private struct IssueRow: View {
-    let identifier: String
-    let systemImage: String
-    let title: String
-    let branch: String?
-    let detail: String
-    let date: Date?
-    var monospacedTitle = false
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: systemImage)
-                .font(.system(size: 11))
-                .foregroundStyle(Theme.tertiary)
-                .frame(width: 14)
-                .padding(.top, 2)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(monospacedTitle ? .system(size: 11, design: .monospaced) : .system(size: 12.5, weight: .medium))
-                    .fixedSize(horizontal: false, vertical: true)
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    if let branch {
-                        Text(branch)
-                            .font(.system(size: 10.5, design: .monospaced))
-                            .foregroundStyle(Theme.tertiary)
-                    }
-                    Text(detail)
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(Theme.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 4)
-                    Text(RepositoryText.relative(date))
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(Theme.tertiary)
-                        .fixedSize()
-                }
-            }
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 7)
-        .background(HoverBackground())
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-        .help([title, branch, detail].compactMap { $0 }.joined(separator: " · "))
-    }
-}
-
-private struct WorkspaceStateView: View {
-    let systemImage: String
-    let title: String
-    let message: String
-    var showsProgress = false
-    var actionTitle: String?
-    var action: (() -> Void)?
-
-    var body: some View {
-        VStack(spacing: 10) {
-            if showsProgress {
-                ProgressView()
-                    .controlSize(.regular)
+            .font(.callout)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            Divider()
+            if let error {
+                ContentUnavailableView("Не удалось прочитать файлы", systemImage: "exclamationmark.triangle", description: Text(error))
+            } else if let files {
+                FileList(files: files)
             } else {
-                Image(systemName: systemImage)
-                    .font(.system(size: 22))
-                    .foregroundStyle(Theme.tertiary)
-            }
-            Text(title)
-                .font(.system(size: 14, weight: .semibold))
-            Text(message)
-                .font(.system(size: 12.5))
-                .foregroundStyle(Theme.secondary)
-                .multilineTextAlignment(.center)
-                .lineLimit(4)
-                .frame(maxWidth: 460)
-                .fixedSize(horizontal: false, vertical: true)
-            if let actionTitle, let action {
-                Button(actionTitle, action: action)
-                    .padding(.top, 4)
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .padding(24)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+// MARK: - Read-only actions outside the app
+
+enum Workspace {
+    static func reveal(_ url: URL) {
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    static func openTerminal(at url: URL) {
+        guard let terminal = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Terminal") else { return }
+        NSWorkspace.shared.open([url], withApplicationAt: terminal, configuration: NSWorkspace.OpenConfiguration())
+    }
+
+    static func copy(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
     }
 }

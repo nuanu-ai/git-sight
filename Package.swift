@@ -5,7 +5,7 @@ import PackageDescription
 let package = Package(
     name: "GitSight",
     platforms: [
-        .macOS(.v13)
+        .macOS(.v14)
     ],
     targets: [
         .target(name: "GitSightCore"),

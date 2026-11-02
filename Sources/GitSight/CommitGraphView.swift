@@ -1,0 +1,128 @@
+import GitSightCore
+import SwiftUI
+
+/// Commits on fixed-height rows, so rails are drawn from row indices and never drift from the text.
+struct CommitGraph: View {
+    let commits: [CommitSnapshot]
+    /// What the commits the range stops at have in common, e.g. "На сервере".
+    let boundaryLabel: String
+    @Binding var selection: String?
+
+    private static let rowHeight: CGFloat = 30
+    private static let laneSpacing: CGFloat = 14
+    private static let laneColors: [Color] = [.blue, .orange, .purple, .green, .pink, .teal]
+
+    private var railWidth: CGFloat {
+        Self.laneX(commits.map(\.lane).max() ?? 0) + 14
+    }
+
+    var body: some View {
+        ScrollView {
+            ZStack(alignment: .topLeading) {
+                rails
+                    .frame(width: railWidth, height: Self.rowHeight * CGFloat(commits.count))
+                LazyVStack(spacing: 0) {
+                    ForEach(commits, id: \.fullHash) { commit in
+                        CommitRow(commit: commit, boundaryLabel: boundaryLabel, isSelected: selection == commit.fullHash)
+                            .padding(.leading, railWidth)
+                            .frame(height: Self.rowHeight)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                guard !commit.isBoundary else { return }
+                                selection = selection == commit.fullHash ? nil : commit.fullHash
+                            }
+                    }
+                }
+            }
+            .padding(.vertical, 6)
+        }
+    }
+
+    private var rails: some View {
+        Canvas { context, size in
+            let rows = Dictionary(uniqueKeysWithValues: commits.enumerated().map { ($0.element.fullHash, $0.offset) })
+            for (row, commit) in commits.enumerated() where !commit.isBoundary {
+                let start = point(row: row, lane: commit.lane)
+                for parentHash in commit.parents {
+                    var path = Path()
+                    path.move(to: start)
+                    if let parentRow = rows[parentHash] {
+                        let parentLane = commits[parentRow].lane
+                        let end = point(row: parentRow, lane: parentLane)
+                        if parentLane == commit.lane {
+                            path.addLine(to: end)
+                        } else {
+                            // Bend within the gap below the child, then follow the parent's rail.
+                            let bend = CGPoint(x: end.x, y: start.y + Self.rowHeight)
+                            path.addCurve(
+                                to: bend,
+                                control1: CGPoint(x: start.x, y: start.y + Self.rowHeight * 0.6),
+                                control2: CGPoint(x: bend.x, y: bend.y - Self.rowHeight * 0.6)
+                            )
+                            path.addLine(to: end)
+                        }
+                    } else {
+                        // The parent is past the history limit.
+                        path.addLine(to: CGPoint(x: start.x, y: size.height))
+                    }
+                    context.stroke(path, with: .color(color(lane: commit.lane).opacity(0.7)), lineWidth: 1.5)
+                }
+            }
+            for (row, commit) in commits.enumerated() {
+                let center = point(row: row, lane: commit.lane)
+                let dot = Path(ellipseIn: CGRect(x: center.x - 4, y: center.y - 4, width: 8, height: 8))
+                if commit.isBoundary {
+                    context.stroke(dot, with: .color(.secondary), lineWidth: 1.5)
+                } else {
+                    context.fill(dot, with: .color(color(lane: commit.lane)))
+                }
+            }
+        }
+        .accessibilityHidden(true)
+    }
+
+    private func point(row: Int, lane: Int) -> CGPoint {
+        CGPoint(x: Self.laneX(lane), y: (CGFloat(row) + 0.5) * Self.rowHeight)
+    }
+
+    private static func laneX(_ lane: Int) -> CGFloat {
+        14 + CGFloat(max(0, lane)) * laneSpacing
+    }
+
+    private func color(lane: Int) -> Color {
+        Self.laneColors[max(0, lane) % Self.laneColors.count]
+    }
+}
+
+private struct CommitRow: View {
+    let commit: CommitSnapshot
+    let boundaryLabel: String
+    let isSelected: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text(commit.isBoundary ? "\(boundaryLabel): \(commit.subject)" : commit.subject)
+                .foregroundStyle(commit.isBoundary ? .secondary : .primary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text(commit.shortHash)
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
+            Text(RepositoryText.age(commit.date, short: true))
+                .font(.caption)
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+                .frame(minWidth: 52, alignment: .trailing)
+        }
+        .padding(.horizontal, 8)
+        .frame(maxHeight: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 5)
+                .fill(isSelected ? Color.accentColor.opacity(0.18) : .clear)
+                .padding(.vertical, 1)
+        )
+        .padding(.trailing, 8)
+        .help("\(commit.subject)\n\(commit.shortHash) · \(commit.author) · \(RepositoryText.fullDate(commit.date))")
+    }
+}

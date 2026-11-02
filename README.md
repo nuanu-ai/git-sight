@@ -6,7 +6,7 @@ It only shows. Deciding what to do about it stays with you.
 
 ## Build and run
 
-Requires macOS 13 or later and a Swift toolchain.
+Requires macOS 14 or later and a Swift toolchain.
 
 ```sh
 swift run GitSight
