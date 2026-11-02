@@ -20,6 +20,12 @@ public struct RepositoryInspector {
         }
         let remote = try git.optionalOutput(in: repositoryURL, ["remote", "get-url", "origin"])
         let lastActivity = worktrees.compactMap(\.lastActivity).max() ?? commits.first?.date
+        let assessment = RepositoryScore.evaluate(
+            dirtyFileCount: dirtyFileCount,
+            behind: divergence.behind,
+            branches: branches,
+            stashes: stashes
+        )
 
         return RepositorySnapshot(
             dirtyFileCount: dirtyFileCount,
@@ -35,8 +41,8 @@ public struct RepositoryInspector {
             edges: edges,
             remoteWebURL: remote.flatMap(webURL(from:)),
             lastActivity: lastActivity,
-            score: 0,
-            severity: .clean
+            score: assessment.score,
+            severity: assessment.severity
         )
     }
 
