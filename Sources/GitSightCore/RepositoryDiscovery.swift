@@ -82,8 +82,9 @@ public struct RepositoryDiscovery {
         return repositories.sorted { $0.path < $1.path }
     }
 
-    /// A linked worktree's `.git` file points at `<main>/.git/worktrees/<name>`.
-    /// The main repository already reports every worktree, so the linked one maps to it.
+    /// A linked worktree's `.git` file points at `<main>/.git/worktrees/<name>`, or at
+    /// `<bare>/worktrees/<name>` for a bare repository. That repository already reports
+    /// every worktree, so the linked one maps to it.
     private static func mainRepository(ofLinkedWorktreeAt gitURL: URL) -> URL? {
         guard let contents = try? String(contentsOf: gitURL, encoding: .utf8),
               contents.hasPrefix("gitdir: ") else { return nil }
@@ -91,7 +92,7 @@ public struct RepositoryDiscovery {
         let gitDirectory = URL(fileURLWithPath: path, relativeTo: gitURL.deletingLastPathComponent()).standardizedFileURL
         let worktrees = gitDirectory.deletingLastPathComponent()
         let commonDirectory = worktrees.deletingLastPathComponent()
-        guard worktrees.lastPathComponent == "worktrees", commonDirectory.lastPathComponent == ".git" else { return nil }
-        return commonDirectory.deletingLastPathComponent()
+        guard worktrees.lastPathComponent == "worktrees" else { return nil }
+        return commonDirectory.lastPathComponent == ".git" ? commonDirectory.deletingLastPathComponent() : commonDirectory
     }
 }

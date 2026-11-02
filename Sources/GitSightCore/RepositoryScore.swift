@@ -17,7 +17,9 @@ enum RepositoryScore {
         // Without a remote every commit is local by choice; the repository gets one notice instead.
         if hasRemote {
             for branch in branches where branch.unpushedCommits > 0 {
-                work.append((branch.lastCommitDate ?? now, abandonedAge))
+                // Squash merges leave exactly this: commits on no remote, upstream deleted.
+                // Reachability cannot tell that from lost work, so it stays a notice.
+                work.append((branch.lastCommitDate ?? now, branch.upstreamGone ? .infinity : abandonedAge))
             }
         }
         for worktree in worktrees {

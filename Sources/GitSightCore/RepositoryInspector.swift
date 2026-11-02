@@ -9,13 +9,16 @@ public struct RepositoryInspector {
         let currentBranch = try git.optionalOutput(in: repositoryURL, [
             "symbolic-ref", "--quiet", "--short", "HEAD"
         ])?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let dirtyFileCount = try dirtyFiles(in: repositoryURL).count
+        let isBare = try git.output(in: repositoryURL, ["rev-parse", "--is-bare-repository"])
+            .trimmingCharacters(in: .whitespacesAndNewlines) == "true"
+        let dirtyFileCount = isBare ? 0 : try dirtyFiles(in: repositoryURL).count
         let worktreeEntries = try worktreeEntries(in: repositoryURL)
         let branches = try branches(in: repositoryURL, checkedOut: Set(worktreeEntries.compactMap(\.branch)))
         let worktrees = try worktrees(worktreeEntries, in: repositoryURL, branches: branches)
         let currentBranchSnapshot = branches.first { $0.name == currentBranch }
         let divergence = (ahead: currentBranchSnapshot?.ahead ?? 0, behind: currentBranchSnapshot?.behind ?? 0)
-        let stashes = try stashes(in: repositoryURL)
+        // Stashes are shared by all worktrees, but `git stash` refuses to run in a bare repository.
+        let stashes = try (isBare ? worktrees.first?.path : repositoryURL).map { try self.stashes(in: $0) } ?? []
         let commits = try commits(in: repositoryURL)
         let edges = commits.flatMap { commit in
             commit.parents.map { CommitEdge(from: commit.fullHash, to: $0) }
@@ -98,23 +101,25 @@ public struct RepositoryInspector {
             count += 1
             skipOriginalPath = status.contains("R") || status.contains("C")
             let path = String(decoding: record.dropFirst(3), as: UTF8.self)
-            // Deleted files have no date; the remaining files still date the work.
-            if let date = (try? FileManager.default.attributesOfItem(
-                atPath: repositoryURL.appendingPathComponent(path).path
-            ))?[.modificationDate] as? Date {
+            // A deleted file has no date of its own; deleting it updated its directory.
+            let fileURL = repositoryURL.appendingPathComponent(path)
+            let attributes = (try? FileManager.default.attributesOfItem(atPath: fileURL.path))
+                ?? (try? FileManager.default.attributesOfItem(atPath: fileURL.deletingLastPathComponent().path))
+            if let date = attributes?[.modificationDate] as? Date {
                 modifiedAt = max(modifiedAt ?? date, date)
             }
         }
         return (count, modifiedAt)
     }
 
-    private func worktreeEntries(in repositoryURL: URL) throws -> [(path: URL, head: String?, branch: String?)] {
+    private func worktreeEntries(in repositoryURL: URL) throws -> [(path: URL, head: String?, branch: String?, isBare: Bool)] {
         let output = try git.output(in: repositoryURL, ["worktree", "list", "--porcelain"])
-        var entries: [(path: URL, head: String?, branch: String?)] = []
+        var entries: [(path: URL, head: String?, branch: String?, isBare: Bool)] = []
         for block in output.components(separatedBy: "\n\n") where !block.isEmpty {
             var path: String?
             var head: String?
             var branch: String?
+            var isBare = false
             for line in block.split(whereSeparator: \.isNewline) {
                 if line.hasPrefix("worktree ") {
                     path = String(line.dropFirst("worktree ".count))
@@ -122,21 +127,24 @@ public struct RepositoryInspector {
                     head = String(line.dropFirst("HEAD ".count))
                 } else if line.hasPrefix("branch refs/heads/") {
                     branch = String(line.dropFirst("branch refs/heads/".count))
+                } else if line == "bare" {
+                    isBare = true
                 }
             }
             guard let path else { continue }
-            entries.append((URL(fileURLWithPath: path, isDirectory: true), head, branch))
+            entries.append((URL(fileURLWithPath: path, isDirectory: true), head, branch, isBare))
         }
         return entries
     }
 
     private func worktrees(
-        _ entries: [(path: URL, head: String?, branch: String?)],
+        _ entries: [(path: URL, head: String?, branch: String?, isBare: Bool)],
         in repositoryURL: URL,
         branches: [BranchSnapshot]
     ) throws -> [WorktreeSnapshot] {
         var snapshots: [WorktreeSnapshot] = []
-        for (index, entry) in entries.enumerated() {
+        // A bare repository is listed first but has no files; its linked worktrees are not main.
+        for (index, entry) in entries.enumerated() where !entry.isBare {
             var isDirectory: ObjCBool = false
             guard FileManager.default.fileExists(atPath: entry.path.path, isDirectory: &isDirectory), isDirectory.boolValue else {
                 continue
@@ -149,7 +157,7 @@ public struct RepositoryInspector {
             var detachedCommits = 0
             if entry.branch == nil, let head = entry.head, head.contains(where: { $0 != "0" }) {
                 detachedCommits = try Self.count(git.output(in: repositoryURL, [
-                    "rev-list", "--count", head, "--not", "--remotes", "--branches"
+                    "rev-list", "--count", head, "--not", "--remotes", "--branches", "--tags"
                 ]))
             }
             let dirty = try dirtyFiles(in: entry.path)
@@ -169,7 +177,7 @@ public struct RepositoryInspector {
     }
 
     private func branches(in repositoryURL: URL, checkedOut: Set<String>) throws -> [BranchSnapshot] {
-        let format = "%(refname:short)%1F%(upstream:short)%1F%(committerdate:iso-strict)%1F%(upstream:track)%1F%(refname)%1E"
+        let format = "%(refname:lstrip=2)%1F%(upstream:short)%1F%(committerdate:iso-strict)%1F%(upstream:track)%1F%(refname)%1E"
         let output = try git.output(in: repositoryURL, [
             "for-each-ref", "--sort=refname", "--format=\(format)", "refs/heads"
         ])
@@ -184,7 +192,8 @@ public struct RepositoryInspector {
                 behind: Self.trackCount("behind", in: fields[3]),
                 lastCommitDate: Self.date(from: fields[2]),
                 hasWorktree: checkedOut.contains(fields[0]),
-                unpushedCommits: try Self.count(unpushed)
+                unpushedCommits: try Self.count(unpushed),
+                upstreamGone: fields[3] == "[gone]"
             )
         }
     }

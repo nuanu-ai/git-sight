@@ -103,14 +103,15 @@ enum RepositoryScannerIntegrationTests {
         let worktreeURL = scanURL.appendingPathComponent("main")
         try runGit(in: bareURL, ["worktree", "add", worktreeURL.path, "main"])
         try "draft\n".write(to: worktreeURL.appendingPathComponent("draft.txt"), atomically: true, encoding: .utf8)
+        try runGit(in: bareURL, ["worktree", "add", "--detach", scanURL.appendingPathComponent("review").path, "main"])
 
         let result = try await RepositoryScanner().scan(under: scanURL)
         try expectEqual(result.failures.map(\.message), [], "a bare repository with worktrees inspects without failures")
         try expectEqual(result.repositories.count, 1, "the bare repository and its worktree are one repository")
         try expectEqual(
             result.repositories.first?.worktrees.map(\.dirtyFileCount),
-            [1],
-            "the worktree of a bare repository reports its uncommitted files"
+            [1, 0],
+            "each worktree of a bare repository reports its own uncommitted files"
         )
     }
 }

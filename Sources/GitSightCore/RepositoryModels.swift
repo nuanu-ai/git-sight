@@ -58,8 +58,19 @@ public struct BranchSnapshot: Equatable {
     public let hasWorktree: Bool
     /// Commits on this branch that no remote-tracking ref contains.
     public let unpushedCommits: Int
+    /// The upstream was deleted on the server, usually after its pull request was merged.
+    public let upstreamGone: Bool
 
-    public init(name: String, upstream: String?, ahead: Int, behind: Int, lastCommitDate: Date?, hasWorktree: Bool, unpushedCommits: Int = 0) {
+    public init(
+        name: String,
+        upstream: String?,
+        ahead: Int,
+        behind: Int,
+        lastCommitDate: Date?,
+        hasWorktree: Bool,
+        unpushedCommits: Int = 0,
+        upstreamGone: Bool = false
+    ) {
         self.name = name
         self.upstream = upstream
         self.ahead = ahead
@@ -67,6 +78,7 @@ public struct BranchSnapshot: Equatable {
         self.lastCommitDate = lastCommitDate
         self.hasWorktree = hasWorktree
         self.unpushedCommits = unpushedCommits
+        self.upstreamGone = upstreamGone
     }
 }
 
