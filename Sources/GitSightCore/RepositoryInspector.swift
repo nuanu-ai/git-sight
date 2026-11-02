@@ -225,16 +225,57 @@ public struct RepositoryInspector {
             parsedCommits.append(contentsOf: try parseCommits(tipOutput))
         }
 
-        var activeLanes: [String] = []
-        var laidOutCommits: [CommitSnapshot] = []
-        for commit in parsedCommits {
-            let lane = activeLanes.firstIndex(of: commit.fullHash) ?? activeLanes.count
-            if !activeLanes.contains(commit.fullHash) {
-                activeLanes.append(commit.fullHash)
+        func topologicallyOrdered(_ commits: [CommitSnapshot]) -> [CommitSnapshot] {
+            let rows = Dictionary(uniqueKeysWithValues: commits.enumerated().map { ($0.element.fullHash, $0.offset) })
+            var childCounts = Dictionary(uniqueKeysWithValues: commits.map { ($0.fullHash, 0) })
+            for commit in commits {
+                for parent in commit.parents where childCounts[parent] != nil {
+                    childCounts[parent]! += 1
+                }
             }
-            activeLanes.removeAll { $0 == commit.fullHash }
+            var readyRows = commits.indices.filter { childCounts[commits[$0].fullHash] == 0 }
+            var ordered: [CommitSnapshot] = []
+            while !readyRows.isEmpty {
+                let row = readyRows.removeFirst()
+                let commit = commits[row]
+                ordered.append(commit)
+                for parent in commit.parents {
+                    guard let childCount = childCounts[parent], let parentRow = rows[parent] else { continue }
+                    childCounts[parent] = childCount - 1
+                    if childCount == 1 {
+                        readyRows.append(parentRow)
+                        readyRows.sort()
+                    }
+                }
+            }
+            guard ordered.count == commits.count else { return commits }
+            return ordered
+        }
+
+        var activeLanes: [String?] = []
+        var laidOutCommits: [CommitSnapshot] = []
+        for commit in topologicallyOrdered(parsedCommits) {
+            let matchingLanes = activeLanes.indices.filter { activeLanes[$0] == commit.fullHash }
+            let lane = matchingLanes.first ?? activeLanes.firstIndex(of: nil) ?? activeLanes.count
+            if lane == activeLanes.count {
+                activeLanes.append(nil)
+            }
+            for matchingLane in matchingLanes {
+                activeLanes[matchingLane] = nil
+            }
+            activeLanes[lane] = nil
+
             for (offset, parent) in commit.parents.enumerated() where !activeLanes.contains(parent) {
-                activeLanes.insert(parent, at: min(lane + offset, activeLanes.count))
+                if offset == 0 {
+                    activeLanes[lane] = parent
+                } else {
+                    let parentLane = activeLanes.firstIndex(of: nil) ?? activeLanes.count
+                    if parentLane == activeLanes.count {
+                        activeLanes.append(parent)
+                    } else {
+                        activeLanes[parentLane] = parent
+                    }
+                }
             }
             laidOutCommits.append(CommitSnapshot(
                 fullHash: commit.fullHash,
