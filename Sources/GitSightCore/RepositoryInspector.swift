@@ -94,10 +94,12 @@ public struct RepositoryInspector {
     /// Boundary commits mark where the range starts, e.g. what the server already has.
     public func history(in repositoryURL: URL, revisions: [String]) throws -> [CommitSnapshot] {
         let format = "%m%x1F%H%x1F%h%x1F%s%x1F%an%x1F%cI%x1F%P%x1F%D%x1E"
+        let limit = 300
+        // "--" keeps a file named like a revision, e.g. HEAD, from making git log ambiguous.
         let output = try git.output(in: repositoryURL, [
-            "log", "--topo-order", "--boundary", "-n", "300", "--date=iso-strict", "--pretty=format:\(format)"
-        ] + revisions)
-        let commits = try Self.records(output).map { record in
+            "log", "--topo-order", "--boundary", "-n", String(limit), "--date=iso-strict", "--pretty=format:\(format)"
+        ] + revisions + ["--"])
+        var commits = try Self.records(output).map { record in
             let fields = Self.fields(record)
             guard fields.count >= 8, let date = Self.date(from: fields[5]) else { throw Self.parseError(record) }
             return CommitSnapshot(
@@ -111,6 +113,10 @@ public struct RepositoryInspector {
                 lane: 0,
                 isBoundary: fields[0] == "-"
             )
+        }
+        // At the limit git marks the cut-off parents as boundary too, so a boundary no longer means "the server has it".
+        if commits.count(where: { !$0.isBoundary }) >= limit {
+            commits.removeAll(where: \.isBoundary)
         }
         return Self.laidOut(commits)
     }
