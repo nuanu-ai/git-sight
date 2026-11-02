@@ -31,6 +31,11 @@ enum RepositoryInspectorIntegrationTests {
     static func main() {
         var failures = 0
         run(name: "inspector reports untracked files", testInspectorReportsUntrackedFilesInRepository, failures: &failures)
+        run(
+            name: "discovery finds nested repositories and linked worktrees",
+            RepositoryDiscoveryIntegrationTests.testFindsNestedRepositoriesAndLinkedWorktrees,
+            failures: &failures
+        )
         if failures > 0 { exit(1) }
     }
 
