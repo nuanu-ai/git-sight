@@ -48,6 +48,11 @@ enum RepositoryInspectorIntegrationTests {
             failures: &failures
         )
         run(
+            name: "cancellation stops blocked repository inspection",
+            RepositoryScannerIntegrationTests.testCancellationStopsBlockedRepositoryInspection,
+            failures: &failures
+        )
+        run(
             name: "inspector reports repository objects without changing filesystem",
             RepositorySnapshotIntegrationTests.testReportsRepositoryObjectsWithoutChangingFilesystem,
             failures: &failures
