@@ -2,104 +2,79 @@ import Foundation
 import GitSightCore
 
 enum RepositoryScoringIntegrationTests {
-    static func testDirtyWorkIsNeutralUntilOriginMoves() throws {
+    static func testPushedAndMergedBranchesAreNotRisk() throws {
         let fixture = try makeRepository()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
-        try "dirty\n".write(to: fixture.repository.appendingPathComponent("untracked.txt"), atomically: true, encoding: .utf8)
+        let old = gitDate(daysAgo: 40)
+        try commit("merged.txt", on: "merged", in: fixture.repository, environment: old)
+        try runGit(in: fixture.repository, ["merge", "--ff-only", "merged"])
+        try runGit(in: fixture.repository, ["push", "origin", "main"])
+        try commit("pushed.txt", on: "pushed", in: fixture.repository, environment: old)
+        try runGit(in: fixture.repository, ["push", "-u", "origin", "pushed"])
+        try runGit(in: fixture.repository, ["checkout", "main"])
 
-        let inspector = RepositoryInspector()
-        let dirtyOnly = try inspector.inspect(repositoryAt: fixture.repository)
-        try expectEqual(dirtyOnly.dirtyFileCount, 1, "fixture has uncommitted work")
-        try expectEqual(dirtyOnly.behind, 0, "fixture starts level with origin")
-        try expectEqual(dirtyOnly.score, 0, "uncommitted work alone is neutral")
-        try expectEqual(dirtyOnly.severity, .clean, "uncommitted work alone stays clean")
-
-        let otherURL = fixture.root.appendingPathComponent("other", isDirectory: true)
-        try runGit(in: fixture.root, ["clone", fixture.origin.path, otherURL.path])
-        try runGit(in: otherURL, ["config", "user.name", "Other User"])
-        try runGit(in: otherURL, ["config", "user.email", "other@example.com"])
-        try "origin\n".write(to: otherURL.appendingPathComponent("origin.txt"), atomically: true, encoding: .utf8)
-        try runGit(in: otherURL, ["add", "origin.txt"])
-        try runGit(in: otherURL, ["commit", "-m", "Origin movement"])
-        try runGit(in: otherURL, ["push"])
-        try runGit(in: fixture.repository, ["fetch", "origin"])
-
-        let diverged = try inspector.inspect(repositoryAt: fixture.repository)
-        try expectEqual(diverged.behind, 1, "local upstream ref observes origin movement")
-        try expectEqual(diverged.dirtyFileCount, 1, "uncommitted work remains present")
-        try expectEqual(diverged.severity, .warning, "dirty work on a moved origin becomes risky")
-        try expectEqual(diverged.score > dirtyOnly.score, true, "origin movement adds integral risk")
+        let snapshot = try RepositoryInspector().inspect(repositoryAt: fixture.repository)
+        try expectEqual(snapshot.branches.map(\.name), ["main", "merged", "pushed"], "fixture keeps every local branch")
+        try expectEqual(snapshot.severity, .clean, "old branches whose commits are on the server hold no unsaved work")
     }
 
-    static func testAbandonedWorkAgesIntoRisk() throws {
+    static func testUnpushedWorkAgesFromInProgressToCritical() throws {
         let fixture = try makeRepository()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
-        try runGit(in: fixture.repository, ["checkout", "-b", "feature"])
-        try "feature\n".write(to: fixture.repository.appendingPathComponent("feature.txt"), atomically: true, encoding: .utf8)
-        try runGit(in: fixture.repository, ["add", "feature.txt"])
-        try runGit(in: fixture.repository, ["commit", "-m", "Unpushed feature"])
+        try commit("feature.txt", on: "feature", in: fixture.repository)
         try runGit(in: fixture.repository, ["checkout", "main"])
-
         let inspector = RepositoryInspector()
-        let freshBranch = try inspector.inspect(repositoryAt: fixture.repository)
-        try expectEqual(freshBranch.branches.first { $0.name == "feature" }?.upstream, nil, "feature has not been pushed")
-        try expectEqual(freshBranch.score, 0, "fresh unpushed work does not create noise")
-        try expectEqual(freshBranch.severity, .clean, "fresh unpushed work stays clean")
+        try expectEqual(try inspector.inspect(repositoryAt: fixture.repository).severity, .attention, "fresh unpushed commits are work in progress")
 
-        let oldBranchDate = gitDate(daysAgo: 4)
-        try runGit(in: fixture.repository, ["checkout", "feature"])
-        try runGit(in: fixture.repository, ["commit", "--amend", "--no-edit"], environment: oldBranchDate)
-        try runGit(in: fixture.repository, ["checkout", "main"])
-        let oldBranch = try inspector.inspect(repositoryAt: fixture.repository)
-        try expectEqual(oldBranch.severity, .warning, "an unpushed branch older than three days needs attention")
-        try expectEqual(oldBranch.score > freshBranch.score, true, "branch age adds risk")
-
-        let auxiliaryURL = fixture.root.appendingPathComponent("auxiliary", isDirectory: true)
-        try runGit(in: fixture.repository, ["worktree", "add", "--detach", auxiliaryURL.path, "main"])
-        try "auxiliary\n".write(to: auxiliaryURL.appendingPathComponent("auxiliary.txt"), atomically: true, encoding: .utf8)
-        try runGit(in: auxiliaryURL, ["add", "auxiliary.txt"])
-        try runGit(in: auxiliaryURL, ["commit", "-m", "Old auxiliary work"], environment: oldBranchDate)
-        let oldWorktree = try inspector.inspect(repositoryAt: fixture.repository)
-        try expectEqual(oldWorktree.worktrees.count, 2, "fixture contains an auxiliary worktree")
-        try expectEqual(oldWorktree.score > oldBranch.score, true, "an old auxiliary worktree adds risk even without dirty files")
-        try "fresh\n".write(to: auxiliaryURL.appendingPathComponent("fresh.txt"), atomically: true, encoding: .utf8)
-        let activeWorktree = try inspector.inspect(repositoryAt: fixture.repository)
-        try expectEqual(activeWorktree.score, oldBranch.score, "fresh changes make an old worktree active rather than abandoned")
+        for (days, severity) in [(4, Severity.warning), (40, .critical)] {
+            try runGit(in: fixture.repository, ["checkout", "feature"])
+            try runGit(in: fixture.repository, ["commit", "--amend", "--no-edit"], environment: gitDate(daysAgo: days))
+            try runGit(in: fixture.repository, ["checkout", "main"])
+            try expectEqual(try inspector.inspect(repositoryAt: fixture.repository).severity, severity, "unpushed commits \(days) days old")
+        }
 
         let stashFixture = try makeRepository()
         defer { try? FileManager.default.removeItem(at: stashFixture.root) }
-        try "old stash\n".write(to: stashFixture.repository.appendingPathComponent("tracked.txt"), atomically: true, encoding: .utf8)
+        try "stashed\n".write(to: stashFixture.repository.appendingPathComponent("tracked.txt"), atomically: true, encoding: .utf8)
         try runGit(in: stashFixture.repository, ["stash", "push", "-m", "old work"], environment: gitDate(daysAgo: 2))
-        let oldStash = try inspector.inspect(repositoryAt: stashFixture.repository)
-        try expectEqual(oldStash.stashes.count, 1, "old stash is visible")
-        try expectEqual(oldStash.severity, .warning, "a two-day-old stash alone creates warning risk")
-        try expectEqual(oldStash.score > 0, true, "stash age contributes risk")
+        try expectEqual(try inspector.inspect(repositoryAt: stashFixture.repository).severity, .warning, "a stash left for two days is abandoned")
     }
 
-    static func testDirtyAdditionalWorktreeNeedsOriginRisk() throws {
+    static func testOldUncommittedWorkIsRiskWhileOriginIsStill() throws {
         let fixture = try makeRepository()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
-        let auxiliaryURL = fixture.root.appendingPathComponent("auxiliary")
-        try runGit(in: fixture.repository, ["worktree", "add", "-b", "auxiliary", auxiliaryURL.path, "main"])
-        try runGit(in: auxiliaryURL, ["branch", "--set-upstream-to=origin/main", "auxiliary"])
-        let otherURL = fixture.root.appendingPathComponent("other")
-        try runGit(in: fixture.root, ["clone", fixture.origin.path, otherURL.path])
-        try runGit(in: otherURL, ["config", "user.name", "Other User"])
-        try runGit(in: otherURL, ["config", "user.email", "other@example.com"])
-        try "origin\n".write(to: otherURL.appendingPathComponent("origin.txt"), atomically: true, encoding: .utf8)
-        try runGit(in: otherURL, ["add", "origin.txt"])
-        try runGit(in: otherURL, ["commit", "-m", "Origin movement"])
-        try runGit(in: otherURL, ["push"])
-        try runGit(in: fixture.repository, ["fetch", "origin"])
-        try "dirty\n".write(to: auxiliaryURL.appendingPathComponent("dirty.txt"), atomically: true, encoding: .utf8)
+        let fileURL = fixture.repository.appendingPathComponent("draft.txt")
+        try "draft\n".write(to: fileURL, atomically: true, encoding: .utf8)
+        let inspector = RepositoryInspector()
+        let fresh = try inspector.inspect(repositoryAt: fixture.repository)
+        try expectEqual(fresh.behind, 0, "origin has not moved")
+        try expectEqual(fresh.severity, .attention, "fresh uncommitted files are work in progress")
 
-        let snapshot = try RepositoryInspector().inspect(repositoryAt: fixture.repository)
-        try expectEqual(snapshot.dirtyFileCount, 0, "main checkout is clean")
-        try expectEqual(snapshot.worktrees.first { !$0.isMain }?.dirtyFileCount, 1, "additional worktree has uncommitted work")
-        try expectEqual(snapshot.severity, .warning, "dirty additional worktree becomes risky when its upstream moves")
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -4 * 24 * 60 * 60)], ofItemAtPath: fileURL.path)
+        try expectEqual(try inspector.inspect(repositoryAt: fixture.repository).severity, .warning, "uncommitted files untouched for four days are abandoned")
     }
 
-    static func testOldLocalMainIsUnpublishedWork() throws {
+    static func testWorktreesMatterOnlyForWorkTheyHold() throws {
+        let fixture = try makeRepository()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let old = gitDate(daysAgo: 4)
+        try commit("pushed.txt", on: "pushed", in: fixture.repository, environment: old)
+        try runGit(in: fixture.repository, ["push", "-u", "origin", "pushed"])
+        try runGit(in: fixture.repository, ["checkout", "main"])
+        let cleanURL = fixture.root.appendingPathComponent("clean-worktree")
+        try runGit(in: fixture.repository, ["worktree", "add", cleanURL.path, "pushed"])
+        let inspector = RepositoryInspector()
+        try expectEqual(try inspector.inspect(repositoryAt: fixture.repository).severity, .clean, "an old worktree of a pushed branch holds nothing unsaved")
+
+        let detachedURL = fixture.root.appendingPathComponent("detached-worktree")
+        try runGit(in: fixture.repository, ["worktree", "add", "--detach", detachedURL.path, "main"])
+        try "detached\n".write(to: detachedURL.appendingPathComponent("detached.txt"), atomically: true, encoding: .utf8)
+        try runGit(in: detachedURL, ["add", "detached.txt"])
+        try runGit(in: detachedURL, ["commit", "-m", "Work on detached HEAD"], environment: old)
+        try expectEqual(try inspector.inspect(repositoryAt: fixture.repository).severity, .warning, "old commits reachable only from a detached worktree are abandoned")
+    }
+
+    static func testRepositoryWithoutRemoteIsFlaggedOnce() throws {
         let repositoryURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -110,13 +85,23 @@ enum RepositoryScoringIntegrationTests {
         try runGit(in: repositoryURL, ["init", "-b", "main"])
         try runGit(in: repositoryURL, ["config", "user.name", "Test User"])
         try runGit(in: repositoryURL, ["config", "user.email", "test@example.com"])
-        try "local\n".write(to: repositoryURL.appendingPathComponent("local.txt"), atomically: true, encoding: .utf8)
-        try runGit(in: repositoryURL, ["add", "local.txt"])
-        try runGit(in: repositoryURL, ["commit", "-m", "Old local work"], environment: gitDate(daysAgo: 4))
+        try commit("local.txt", on: nil, in: repositoryURL, environment: gitDate(daysAgo: 40))
+        try commit("side.txt", on: "side", in: repositoryURL, environment: gitDate(daysAgo: 40))
 
-        let snapshot = try RepositoryInspector().inspect(repositoryAt: repositoryURL)
-        try expectEqual(snapshot.branches.first?.upstream, nil, "local main has no upstream")
-        try expectEqual(snapshot.severity, .warning, "old unpublished main is not exempt from abandonment risk")
+        let inspector = RepositoryInspector()
+        try expectEqual(try inspector.inspect(repositoryAt: repositoryURL).severity, .attention, "a repository kept only locally is one notice, not abandoned branches")
+
+        let draftURL = repositoryURL.appendingPathComponent("draft.txt")
+        try "draft\n".write(to: draftURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -4 * 24 * 60 * 60)], ofItemAtPath: draftURL.path)
+        try expectEqual(try inspector.inspect(repositoryAt: repositoryURL).severity, .warning, "old uncommitted files are abandoned with or without a remote")
+    }
+
+    private static func commit(_ file: String, on branch: String?, in repositoryURL: URL, environment: [String: String] = [:]) throws {
+        if let branch { try runGit(in: repositoryURL, ["checkout", "-b", branch]) }
+        try "\(file)\n".write(to: repositoryURL.appendingPathComponent(file), atomically: true, encoding: .utf8)
+        try runGit(in: repositoryURL, ["add", file])
+        try runGit(in: repositoryURL, ["commit", "-m", "Add \(file)"], environment: environment)
     }
 
     private static func gitDate(daysAgo: Int) -> [String: String] {

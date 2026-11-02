@@ -107,26 +107,15 @@ enum RepositoryInspectorIntegrationTests {
             ChangedFilesIntegrationTests.testReportsFilesChangedBySelectedCommit,
             failures: &failures
         )
-        run(
-            name: "dirty work is neutral until origin moves",
-            RepositoryScoringIntegrationTests.testDirtyWorkIsNeutralUntilOriginMoves,
-            failures: &failures
-        )
-        run(
-            name: "abandoned branches, worktrees, and stashes age into risk",
-            RepositoryScoringIntegrationTests.testAbandonedWorkAgesIntoRisk,
-            failures: &failures
-        )
-        run(
-            name: "dirty additional worktree needs origin risk",
-            RepositoryScoringIntegrationTests.testDirtyAdditionalWorktreeNeedsOriginRisk,
-            failures: &failures
-        )
-        run(
-            name: "old local main is unpublished work",
-            RepositoryScoringIntegrationTests.testOldLocalMainIsUnpublishedWork,
-            failures: &failures
-        )
+        for (name, test) in [
+            ("pushed and merged branches are not risk", RepositoryScoringIntegrationTests.testPushedAndMergedBranchesAreNotRisk),
+            ("unpushed work ages from in progress to critical", RepositoryScoringIntegrationTests.testUnpushedWorkAgesFromInProgressToCritical),
+            ("old uncommitted work is risk while origin is still", RepositoryScoringIntegrationTests.testOldUncommittedWorkIsRiskWhileOriginIsStill),
+            ("worktrees matter only for work they hold", RepositoryScoringIntegrationTests.testWorktreesMatterOnlyForWorkTheyHold),
+            ("repository without remote is flagged once", RepositoryScoringIntegrationTests.testRepositoryWithoutRemoteIsFlaggedOnce)
+        ] {
+            run(name: name, test, failures: &failures)
+        }
         if failures > 0 { exit(1) }
     }
 
