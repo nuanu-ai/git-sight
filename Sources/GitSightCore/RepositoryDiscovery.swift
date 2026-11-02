@@ -24,6 +24,7 @@ public struct RepositoryDiscovery {
         var scanned = 0
         var lastFractionCompleted = 0.0
         var repositories: [URL] = []
+        var seen: Set<String> = []
         let excludedDirectories: Set<String> = ["Library", "node_modules"]
 
         while !pending.isEmpty {
@@ -32,7 +33,10 @@ public struct RepositoryDiscovery {
             scanned += 1
             let gitURL = directoryURL.appendingPathComponent(".git")
             if FileManager.default.fileExists(atPath: gitURL.path) {
-                repositories.append(directoryURL)
+                let repositoryURL = Self.mainRepository(ofLinkedWorktreeAt: gitURL) ?? directoryURL
+                if seen.insert(repositoryURL.resolvingSymlinksInPath().path).inserted {
+                    repositories.append(repositoryURL)
+                }
             } else {
                 let children: [URL]?
                 do {
@@ -76,5 +80,18 @@ public struct RepositoryDiscovery {
             ))
         }
         return repositories.sorted { $0.path < $1.path }
+    }
+
+    /// A linked worktree's `.git` file points at `<main>/.git/worktrees/<name>`.
+    /// The main repository already reports every worktree, so the linked one maps to it.
+    private static func mainRepository(ofLinkedWorktreeAt gitURL: URL) -> URL? {
+        guard let contents = try? String(contentsOf: gitURL, encoding: .utf8),
+              contents.hasPrefix("gitdir: ") else { return nil }
+        let path = contents.dropFirst("gitdir: ".count).trimmingCharacters(in: .whitespacesAndNewlines)
+        let gitDirectory = URL(fileURLWithPath: path, relativeTo: gitURL.deletingLastPathComponent()).standardizedFileURL
+        let worktrees = gitDirectory.deletingLastPathComponent()
+        let commonDirectory = worktrees.deletingLastPathComponent()
+        guard worktrees.lastPathComponent == "worktrees", commonDirectory.lastPathComponent == ".git" else { return nil }
+        return commonDirectory.deletingLastPathComponent()
     }
 }
