@@ -63,7 +63,7 @@ public struct RepositoryScanner {
                 scannedDirectories: discovery.scannedDirectories,
                 processedRepositories: 0,
                 totalRepositories: discovery.discoveredRepositories,
-                fractionCompleted: discovery.fractionCompleted
+                fractionCompleted: discovery.fractionCompleted / 2
             ))
         }, issue: { path, error in
             failures.append(RepositoryScanFailure(
@@ -91,7 +91,7 @@ public struct RepositoryScanner {
                 scannedDirectories: scannedDirectories,
                 processedRepositories: index + 1,
                 totalRepositories: repositoryURLs.count,
-                fractionCompleted: Double(index + 1) / Double(repositoryURLs.count)
+                fractionCompleted: 0.5 + Double(index + 1) / Double(repositoryURLs.count) / 2
             ))
         }
         if repositoryURLs.isEmpty {

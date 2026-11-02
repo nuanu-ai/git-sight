@@ -47,9 +47,10 @@ enum RepositoryScannerIntegrationTests {
         guard mkfifo(headURL.path, 0o600) == 0 else {
             throw TestFailure(description: "could not create blocking HEAD fixture")
         }
+        var writer = Int32(-1)
         defer {
             // Unblock a failing old implementation, then prevent later Git commands from blocking again.
-            let writer = open(headURL.path, O_WRONLY | O_NONBLOCK)
+            if writer < 0 { writer = open(headURL.path, O_WRONLY | O_NONBLOCK) }
             try? FileManager.default.removeItem(at: headURL)
             if writer >= 0 { close(writer) }
             try? FileManager.default.removeItem(at: rootURL)
@@ -69,7 +70,12 @@ enum RepositoryScannerIntegrationTests {
                 unexpectedError = error.localizedDescription
             }
         }
-        usleep(200_000)
+        let readerDeadline = DispatchTime.now().uptimeNanoseconds + 3 * 1_000_000_000
+        while writer < 0 && DispatchTime.now().uptimeNanoseconds < readerDeadline {
+            writer = open(headURL.path, O_WRONLY | O_NONBLOCK)
+            if writer < 0 { usleep(10_000) }
+        }
+        try expectEqual(writer >= 0, true, "Git actually blocks on HEAD before the test requests cancellation")
         scan.cancel()
 
         try expectEqual(finished.wait(timeout: .now() + 3), .success, "cancellation stops Git instead of waiting for blocked input")
