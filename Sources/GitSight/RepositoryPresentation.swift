@@ -26,6 +26,16 @@ enum RepositoryText {
         return relative(date)
     }
 
+    /// "3 дня", "2 месяца": how long work has been left, without "назад".
+    static func age(_ date: Date) -> String {
+        let formatter = DateComponentsFormatter()
+        formatter.calendar?.locale = Locale(identifier: "ru_RU")
+        formatter.unitsStyle = .full
+        formatter.maximumUnitCount = 1
+        formatter.allowedUnits = [.year, .month, .weekOfMonth, .day, .hour, .minute]
+        return formatter.string(from: date, to: Date()) ?? "—"
+    }
+
     static func fullDate(_ date: Date) -> String {
         fullDateFormatter.string(from: date)
     }
@@ -42,8 +52,12 @@ enum RepositoryText {
         counted(count, one: "репозиторий", few: "репозитория", many: "репозиториев")
     }
 
-    static func branchesWithoutWorktrees(_ count: Int) -> String {
-        counted(count, one: "ветка без ворктри", few: "ветки без ворктри", many: "веток без ворктри")
+    static func branches(_ count: Int) -> String {
+        counted(count, one: "ветка", few: "ветки", many: "веток")
+    }
+
+    static func stashes(_ count: Int) -> String {
+        counted(count, one: "стэш", few: "стэша", many: "стэшей")
     }
 
     static func path(_ url: URL) -> String {
@@ -73,35 +87,54 @@ enum RepositoryText {
 }
 
 extension RepositorySnapshot {
+    var unpushedBranches: [BranchSnapshot] {
+        hasRemote ? branches.filter { $0.unpushedCommits > 0 } : []
+    }
+
+    var dirtyWorktrees: [WorktreeSnapshot] {
+        worktrees.filter { $0.dirtyFileCount > 0 }
+    }
+
+    var detachedWorktrees: [WorktreeSnapshot] {
+        worktrees.filter { $0.unpushedCommits > 0 }
+    }
+
+    /// Without unsaved work, attention can only mean the repository has no remote.
+    var statusLabel: String {
+        severity == .attention && oldestUnsavedWork == nil ? "без remote" : severity.label
+    }
+
     var shortSignal: String {
         let signals = issueSignals
-        if signals.isEmpty { return "всё чисто" }
+        if signals.isEmpty { return "всё на сервере" }
         return signals.prefix(2).joined(separator: " · ")
     }
 
     var fullReason: String {
         let signals = issueSignals
-        if signals.isEmpty { return "Заброшенной работы нет." }
-        return signals.joined(separator: " · ")
+        if signals.isEmpty { return "Всё, что есть локально, есть и на сервере." }
+        var reason = signals.joined(separator: " · ")
+        if let oldestUnsavedWork {
+            reason += " · самому старому \(RepositoryText.age(oldestUnsavedWork))"
+        }
+        return reason
     }
 
     private var issueSignals: [String] {
         var signals: [String] = []
-        if dirtyFileCount > 0 {
-            signals.append("незакоммичено: \(RepositoryText.files(dirtyFileCount))")
+        let dirtyCount = dirtyWorktrees.reduce(0) { $0 + $1.dirtyFileCount }
+        if dirtyCount > 0 {
+            signals.append("не закоммичено: \(RepositoryText.files(dirtyCount))")
         }
-        if ahead > 0 { signals.append("upstream +\(ahead)") }
-        if behind > 0 { signals.append("upstream −\(behind)") }
-        let additionalWorktrees = worktrees.filter { !$0.isMain }
-        if !additionalWorktrees.isEmpty {
-            signals.append("\(additionalWorktrees.count) ворктри")
+        let unpushedCount = unpushedBranches.count + detachedWorktrees.count
+        if unpushedCount > 0 {
+            signals.append("не запушено: \(RepositoryText.branches(unpushedCount))")
         }
-        let looseBranches = branches.filter { !$0.hasWorktree }
-        if !looseBranches.isEmpty {
-            signals.append(RepositoryText.branchesWithoutWorktrees(looseBranches.count))
+        if !stashes.isEmpty {
+            signals.append(RepositoryText.stashes(stashes.count))
         }
-        if let oldestStash = stashes.min(by: { $0.date < $1.date }) {
-            signals.append("стэш \(RepositoryText.relative(oldestStash.date))")
+        if !hasRemote {
+            signals.append("нет remote")
         }
         return signals
     }

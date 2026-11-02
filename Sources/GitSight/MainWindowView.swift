@@ -25,10 +25,10 @@ extension Severity {
 
     var label: String {
         switch self {
-        case .clean: return "порядок"
-        case .attention: return "внимание"
-        case .warning: return "плохо"
-        case .critical: return "критично"
+        case .clean: return "чисто"
+        case .attention: return "в работе"
+        case .warning: return "заброшено"
+        case .critical: return "забыто"
         }
     }
 }
@@ -242,8 +242,8 @@ private struct RepositorySidebar: View {
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(Theme.secondary)
                 if !model.repositories.isEmpty {
-                    let problemCount = model.repositories.filter { $0.severity != .clean }.count
-                    Text("· проблемы в \(problemCount)")
+                    let abandonedCount = model.repositories.filter { $0.severity >= .warning }.count
+                    Text("· заброшено в \(abandonedCount)")
                         .font(.system(size: 12))
                         .foregroundStyle(Theme.tertiary)
                 }
@@ -297,7 +297,7 @@ private struct RepositoryRow: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 4)
-                Text(repository.severity.label)
+                Text(repository.statusLabel)
                     .font(.system(size: 11.5, weight: .medium))
                     .foregroundStyle(repository.severity.color)
             }
@@ -309,7 +309,7 @@ private struct RepositoryRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(repository.name), \(repository.severity.label), \(repository.shortSignal)")
+        .accessibilityLabel("\(repository.name), \(repository.statusLabel), \(repository.shortSignal)")
     }
 }
 
@@ -329,7 +329,7 @@ struct RepositoryDetailView: View {
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 8)
-                    Text(repository.severity.label)
+                    Text(repository.statusLabel)
                         .font(.system(size: 11.5, weight: .medium))
                         .foregroundStyle(repository.severity.color)
                 }
@@ -358,24 +358,13 @@ private struct IssuePanel: View {
     @ObservedObject var model: WorkspaceModel
     let repository: RepositorySnapshot
 
-    private var additionalWorktrees: [WorktreeSnapshot] {
-        repository.worktrees
-            .filter { !$0.isMain }
-            .sorted { ($0.lastActivity ?? .distantFuture) < ($1.lastActivity ?? .distantFuture) }
-    }
-
-    private var looseBranches: [BranchSnapshot] {
-        repository.branches
-            .filter { !$0.hasWorktree }
-            .sorted { ($0.lastCommitDate ?? .distantFuture) < ($1.lastCommitDate ?? .distantFuture) }
-    }
-
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                let dirtyWorktrees = repository.worktrees.filter { $0.dirtyFileCount > 0 }
+                let dirtyWorktrees = repository.dirtyWorktrees
+                    .sorted { ($0.dirtyModifiedAt ?? .distantFuture) < ($1.dirtyModifiedAt ?? .distantFuture) }
                 if !dirtyWorktrees.isEmpty {
-                    IssueSection(title: "Незакоммиченное") {
+                    IssueSection(title: "Не закоммичено") {
                         ForEach(dirtyWorktrees, id: \.path) { worktree in
                             IssueRow(
                                 identifier: "dirty-\(worktree.path.path)",
@@ -383,51 +372,35 @@ private struct IssuePanel: View {
                                 title: worktree.isMain ? "основной чекаут" : worktree.name,
                                 branch: worktree.branch,
                                 detail: RepositoryText.files(worktree.dirtyFileCount),
-                                date: worktree.lastActivity
-                            )
-                        }
-                    }
-                } else if repository.dirtyFileCount > 0 {
-                    IssueSection(title: "Незакоммиченное") {
-                        IssueRow(
-                            identifier: "dirty-main",
-                            systemImage: "pencil",
-                            title: "основной чекаут",
-                            branch: repository.currentBranch,
-                            detail: RepositoryText.files(repository.dirtyFileCount),
-                            date: repository.lastActivity
-                        )
-                    }
-                }
-
-                if !additionalWorktrees.isEmpty {
-                    IssueSection(title: "Ворктри · \(additionalWorktrees.count)") {
-                        ForEach(additionalWorktrees, id: \.path) { worktree in
-                            IssueRow(
-                                identifier: "worktree-\(worktree.path.path)",
-                                systemImage: "folder",
-                                title: worktree.name,
-                                branch: worktree.branch,
-                                detail: worktree.dirtyFileCount > 0
-                                    ? "\(RepositoryText.files(worktree.dirtyFileCount)) не закоммичено"
-                                    : "без изменений",
-                                date: worktree.lastActivity
+                                date: worktree.dirtyModifiedAt ?? worktree.lastActivity
                             )
                         }
                     }
                 }
 
-                if !looseBranches.isEmpty {
-                    IssueSection(title: "Ветки без ворктри · \(looseBranches.count)") {
-                        ForEach(looseBranches, id: \.name) { branch in
+                let unpushedBranches = repository.unpushedBranches
+                    .sorted { ($0.lastCommitDate ?? .distantFuture) < ($1.lastCommitDate ?? .distantFuture) }
+                if !unpushedBranches.isEmpty || !repository.detachedWorktrees.isEmpty {
+                    IssueSection(title: "Нет на сервере") {
+                        ForEach(unpushedBranches, id: \.name) { branch in
                             IssueRow(
                                 identifier: "branch-\(branch.name)",
                                 systemImage: "arrow.triangle.branch",
                                 title: branch.name,
                                 branch: nil,
-                                detail: branchDetail(branch),
+                                detail: RepositoryText.commits(branch.unpushedCommits),
                                 date: branch.lastCommitDate,
                                 monospacedTitle: true
+                            )
+                        }
+                        ForEach(repository.detachedWorktrees, id: \.path) { worktree in
+                            IssueRow(
+                                identifier: "detached-\(worktree.path.path)",
+                                systemImage: "folder",
+                                title: worktree.name,
+                                branch: "detached HEAD",
+                                detail: RepositoryText.commits(worktree.unpushedCommits),
+                                date: worktree.lastActivity
                             )
                         }
                     }
@@ -449,20 +422,17 @@ private struct IssuePanel: View {
                     }
                 }
 
-                if repository.severity == .clean {
-                    Label("Срочных рисков нет.", systemImage: "checkmark.circle")
+                if !repository.hasRemote {
+                    Label("Нет remote: вся история есть только на этом компьютере.", systemImage: "externaldrive")
                         .font(.system(size: 12.5))
                         .foregroundStyle(Theme.tertiary)
-                        .padding(.horizontal, 16)
+                        .padding(.horizontal, 6)
                         .padding(.top, 16)
-                } else if repository.dirtyFileCount == 0
-                            && additionalWorktrees.isEmpty
-                            && looseBranches.isEmpty
-                            && repository.stashes.isEmpty {
-                    Text("Локальные списки пусты.")
+                } else if repository.severity == .clean {
+                    Label("Всё, что есть локально, есть и на сервере.", systemImage: "checkmark.circle")
                         .font(.system(size: 12.5))
                         .foregroundStyle(Theme.tertiary)
-                        .padding(.horizontal, 16)
+                        .padding(.horizontal, 6)
                         .padding(.top, 16)
                 }
             }
@@ -471,14 +441,6 @@ private struct IssuePanel: View {
             .padding(.bottom, 24)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-    }
-
-    private func branchDetail(_ branch: BranchSnapshot) -> String {
-        var details: [String] = []
-        if branch.upstream == nil { details.append("без upstream") }
-        if branch.ahead > 0 { details.append("↑\(branch.ahead)") }
-        if branch.behind > 0 { details.append("↓\(branch.behind)") }
-        return details.isEmpty ? "без расхождений" : details.joined(separator: " · ")
     }
 }
 
