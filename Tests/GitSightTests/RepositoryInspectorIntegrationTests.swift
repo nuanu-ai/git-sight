@@ -12,13 +12,14 @@ func expectEqual<T: Equatable>(_ actual: T, _ expected: T, _ behavior: String) t
     }
 }
 
-func runGit(in repositoryURL: URL, _ arguments: [String]) throws {
+func runGit(in repositoryURL: URL, _ arguments: [String], environment: [String: String] = [:]) throws {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
     process.arguments = arguments
     process.currentDirectoryURL = repositoryURL
     process.standardOutput = Pipe()
     process.standardError = Pipe()
+    process.environment = ProcessInfo.processInfo.environment.merging(environment) { _, new in new }
     try process.run()
     process.waitUntilExit()
     guard process.terminationStatus == 0 else {
@@ -49,6 +50,16 @@ enum RepositoryInspectorIntegrationTests {
         run(
             name: "inspector reports files changed by selected commit",
             ChangedFilesIntegrationTests.testReportsFilesChangedBySelectedCommit,
+            failures: &failures
+        )
+        run(
+            name: "dirty work is neutral until origin moves",
+            RepositoryScoringIntegrationTests.testDirtyWorkIsNeutralUntilOriginMoves,
+            failures: &failures
+        )
+        run(
+            name: "old stash and unpushed branch accumulate risk",
+            RepositoryScoringIntegrationTests.testOldStashAndUnpushedBranchAccumulateRisk,
             failures: &failures
         )
         if failures > 0 { exit(1) }
