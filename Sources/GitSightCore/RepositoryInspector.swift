@@ -49,7 +49,7 @@ public struct RepositoryInspector {
 
     public func changedFiles(in repositoryURL: URL, commit: CommitSnapshot) throws -> [CommitFileSnapshot] {
         let result = try git.run(in: repositoryURL, [
-            "diff-tree", "--no-commit-id", "--name-status", "-r", "--root", "--no-renames",
+            "diff-tree", "--no-commit-id", "--name-status", "-r", "--root", "--no-renames", "--diff-merges=first-parent",
             "--format=", "-z", commit.fullHash
         ])
         guard result.status == 0 else {
