@@ -53,7 +53,7 @@ public struct RepositoryScanner {
     public func scan(
         under rootURL: URL,
         progress: (RepositoryScanProgress) -> Void = { _ in }
-    ) throws -> RepositoryScanResult {
+    ) async throws -> RepositoryScanResult {
         var scannedDirectories = 0
         var failures: [RepositoryScanFailure] = []
         let repositoryURLs = try RepositoryDiscovery().repositories(under: rootURL, progress: { discovery in
@@ -72,27 +72,37 @@ public struct RepositoryScanner {
             ))
         })
 
-        let inspector = RepositoryInspector()
+        // Each inspection runs git processes one after another, so this also bounds concurrent git processes.
+        let width = max(2, ProcessInfo.processInfo.activeProcessorCount)
         var snapshots: [RepositorySnapshot] = []
-        for (index, repositoryURL) in repositoryURLs.enumerated() {
-            try Task.checkCancellation()
-            do {
-                snapshots.append(try inspector.inspect(repositoryAt: repositoryURL))
-            } catch is CancellationError {
-                throw CancellationError()
-            } catch {
-                failures.append(RepositoryScanFailure(
-                    path: repositoryURL,
-                    message: error.localizedDescription
-                ))
+        var processed = 0
+        try await withThrowingTaskGroup(of: (URL, Result<RepositorySnapshot, Error>).self) { group in
+            var pending = repositoryURLs.makeIterator()
+            for _ in 0..<width {
+                guard let url = pending.next() else { break }
+                group.addTask { (url, Result { try RepositoryInspector().inspect(repositoryAt: url) }) }
             }
-            progress(RepositoryScanProgress(
-                phase: .inspection,
-                scannedDirectories: scannedDirectories,
-                processedRepositories: index + 1,
-                totalRepositories: repositoryURLs.count,
-                fractionCompleted: 0.5 + Double(index + 1) / Double(repositoryURLs.count) / 2
-            ))
+            while let (url, result) = try await group.next() {
+                try Task.checkCancellation()
+                switch result {
+                case .success(let snapshot):
+                    snapshots.append(snapshot)
+                case .failure(let error):
+                    if error is CancellationError { throw error }
+                    failures.append(RepositoryScanFailure(path: url, message: error.localizedDescription))
+                }
+                processed += 1
+                progress(RepositoryScanProgress(
+                    phase: .inspection,
+                    scannedDirectories: scannedDirectories,
+                    processedRepositories: processed,
+                    totalRepositories: repositoryURLs.count,
+                    fractionCompleted: 0.5 + Double(processed) / Double(repositoryURLs.count) / 2
+                ))
+                if let url = pending.next() {
+                    group.addTask { (url, Result { try RepositoryInspector().inspect(repositoryAt: url) }) }
+                }
+            }
         }
         if repositoryURLs.isEmpty {
             progress(RepositoryScanProgress(
@@ -103,6 +113,9 @@ public struct RepositoryScanner {
                 fractionCompleted: 1
             ))
         }
-        return RepositoryScanResult(repositories: snapshots, failures: failures)
+        return RepositoryScanResult(
+            repositories: snapshots.sorted { $0.path.path < $1.path.path },
+            failures: failures.sorted { $0.path.path < $1.path.path }
+        )
     }
 }

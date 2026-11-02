@@ -29,80 +29,80 @@ func runGit(in repositoryURL: URL, _ arguments: [String], environment: [String: 
 
 @main
 enum RepositoryInspectorIntegrationTests {
-    static func main() {
+    static func main() async {
         var failures = 0
-        run(
+        await run(
             name: "inspection never runs repository hooks",
             GitSafetyIntegrationTests.testInspectionNeverRunsRepositoryHooks,
             failures: &failures
         )
-        run(
+        await run(
             name: "gone upstream does not hide repository",
             GitSafetyIntegrationTests.testGoneUpstreamDoesNotHideRepository,
             failures: &failures
         )
-        run(
+        await run(
             name: "each branch is compared with its own upstream",
             RepositorySnapshotIntegrationTests.testEachBranchIsComparedWithItsOwnUpstream,
             failures: &failures
         )
-        run(name: "inspector reports untracked files", testInspectorReportsUntrackedFilesInRepository, failures: &failures)
-        run(
+        await run(name: "inspector reports untracked files", testInspectorReportsUntrackedFilesInRepository, failures: &failures)
+        await run(
             name: "linked worktrees report through their main repository",
             RepositoryDiscoveryIntegrationTests.testLinkedWorktreesReportThroughTheirMainRepository,
             failures: &failures
         )
-        run(
+        await run(
             name: "broken repository does not cancel scan",
             RepositoryScannerIntegrationTests.testBrokenRepositoryDoesNotCancelScan,
             failures: &failures
         )
-        run(
+        await run(
             name: "cancellation stops blocked repository inspection",
             RepositoryScannerIntegrationTests.testCancellationStopsBlockedRepositoryInspection,
             failures: &failures
         )
-        run(
+        await run(
             name: "inspector reports repository objects without changing filesystem",
             RepositorySnapshotIntegrationTests.testReportsRepositoryObjectsWithoutChangingFilesystem,
             failures: &failures
         )
-        run(
+        await run(
             name: "missing linked worktree does not hide repository",
             RepositorySnapshotIntegrationTests.testMissingLinkedWorktreeDoesNotHideRepository,
             failures: &failures
         )
-        run(
+        await run(
             name: "inherited Git environment cannot redirect inspection",
             RepositorySnapshotIntegrationTests.testGitEnvironmentCannotRedirectInspection,
             failures: &failures
         )
-        run(
+        await run(
             name: "commit topology has stable parent edges and distinct rails",
             CommitTopologyIntegrationTests.testMergeCommitHasStableParentEdgesAndDistinctRails,
             failures: &failures
         )
-        run(
+        await run(
             name: "independent lane survives interleaved merge parents",
             CommitTopologyIntegrationTests.testIndependentLaneSurvivesInterleavedMergeParents,
             failures: &failures
         )
-        run(
+        await run(
             name: "history includes work outside the current branch",
             CommitTopologyIntegrationTests.testHistoryIncludesWorkOutsideCurrentBranch,
             failures: &failures
         )
-        run(
+        await run(
             name: "history limit keeps every local branch tip",
             CommitTopologyIntegrationTests.testHistoryLimitKeepsEveryLocalBranchTip,
             failures: &failures
         )
-        run(
+        await run(
             name: "included parents follow children across history limit",
             CommitTopologyIntegrationTests.testIncludedParentsFollowChildrenAcrossHistoryLimit,
             failures: &failures
         )
-        run(
+        await run(
             name: "inspector reports files changed by selected commit",
             ChangedFilesIntegrationTests.testReportsFilesChangedBySelectedCommit,
             failures: &failures
@@ -114,14 +114,14 @@ enum RepositoryInspectorIntegrationTests {
             ("worktrees matter only for work they hold", RepositoryScoringIntegrationTests.testWorktreesMatterOnlyForWorkTheyHold),
             ("repository without remote is flagged once", RepositoryScoringIntegrationTests.testRepositoryWithoutRemoteIsFlaggedOnce)
         ] {
-            run(name: name, test, failures: &failures)
+            await run(name: name, test, failures: &failures)
         }
         if failures > 0 { exit(1) }
     }
 
-    private static func run(name: String, _ test: () throws -> Void, failures: inout Int) {
+    private static func run(name: String, _ test: () async throws -> Void, failures: inout Int) async {
         do {
-            try test()
+            try await test()
             print("PASS: \(name)")
         } catch {
             failures += 1

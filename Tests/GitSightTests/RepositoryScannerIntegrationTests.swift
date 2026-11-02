@@ -3,7 +3,7 @@ import Foundation
 import GitSightCore
 
 enum RepositoryScannerIntegrationTests {
-    static func testBrokenRepositoryDoesNotCancelScan() throws {
+    static func testBrokenRepositoryDoesNotCancelScan() async throws {
         let rootURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -23,7 +23,7 @@ enum RepositoryScannerIntegrationTests {
         try runGit(in: validURL, ["commit", "-m", "Initial"])
 
         var updates: [RepositoryScanProgress] = []
-        let result = try RepositoryScanner().scan(under: rootURL) { updates.append($0) }
+        let result = try await RepositoryScanner().scan(under: rootURL) { updates.append($0) }
         try expectEqual(result.repositories.map(\.path.path), [validURL.path], "valid repository survives another repository's failure")
         try expectEqual(result.failures.map(\.path.path), [brokenURL.path], "broken repository is reported without cancelling the scan")
         try expectEqual(updates.last?.fractionCompleted, 1, "scan reaches a determinate finished state")
@@ -56,7 +56,7 @@ enum RepositoryScannerIntegrationTests {
             try? FileManager.default.removeItem(at: rootURL)
         }
 
-        let scan = Task.detached { try RepositoryScanner().scan(under: rootURL) }
+        let scan = Task.detached { try await RepositoryScanner().scan(under: rootURL) }
         let finished = DispatchSemaphore(value: 0)
         var unexpectedResult: RepositoryScanResult?
         var unexpectedError: String?

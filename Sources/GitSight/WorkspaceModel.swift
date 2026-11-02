@@ -90,7 +90,7 @@ final class WorkspaceModel: ObservableObject {
 
         let worker = Task.detached(priority: .userInitiated) { [weak self] () throws -> RepositoryScanResult in
             guard let self else { throw CancellationError() }
-            return try RepositoryScanner().scan(under: root) { progress in
+            return try await RepositoryScanner().scan(under: root) { progress in
                 Task { @MainActor [weak self] in
                     guard let self, self.scanGeneration == generation, self.isScanning else { return }
                     self.scanProgress = progress
