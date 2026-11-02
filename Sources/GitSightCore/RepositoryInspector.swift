@@ -149,7 +149,7 @@ public struct RepositoryInspector {
         let output = try git.output(in: repositoryURL, [
             "log", "--topo-order", "-n", "100", "--date=iso-strict", "--pretty=format:\(format)"
         ])
-        return try Self.records(output).map { record in
+        let parsedCommits = try Self.records(output).map { record in
             let fields = Self.fields(record)
             guard fields.count >= 7, let date = Self.date(from: fields[4]) else { throw Self.parseError(record) }
             return CommitSnapshot(
@@ -163,6 +163,30 @@ public struct RepositoryInspector {
                 lane: 0
             )
         }
+
+        var activeLanes: [String] = []
+        var laidOutCommits: [CommitSnapshot] = []
+        for commit in parsedCommits {
+            let lane = activeLanes.firstIndex(of: commit.fullHash) ?? activeLanes.count
+            if !activeLanes.contains(commit.fullHash) {
+                activeLanes.append(commit.fullHash)
+            }
+            activeLanes.removeAll { $0 == commit.fullHash }
+            for (offset, parent) in commit.parents.enumerated() where !activeLanes.contains(parent) {
+                activeLanes.insert(parent, at: min(lane + offset, activeLanes.count))
+            }
+            laidOutCommits.append(CommitSnapshot(
+                fullHash: commit.fullHash,
+                shortHash: commit.shortHash,
+                subject: commit.subject,
+                author: commit.author,
+                date: commit.date,
+                parents: commit.parents,
+                refs: commit.refs,
+                lane: lane
+            ))
+        }
+        return laidOutCommits
     }
 
     private func webURL(from remote: String) -> URL? {
