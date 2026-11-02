@@ -22,6 +22,7 @@ public struct RepositoryDiscovery {
     ) throws -> [URL] {
         var pending: [URL] = [rootURL]
         var scanned = 0
+        var lastFractionCompleted = 0.0
         var repositories: [URL] = []
         let excludedDirectories: Set<String> = ["Library", "node_modules"]
 
@@ -67,10 +68,11 @@ public struct RepositoryDiscovery {
                     }
                 }
             }
+            lastFractionCompleted = max(lastFractionCompleted, Double(scanned) / Double(scanned + pending.count))
             progress(RepositoryDiscoveryProgress(
                 scannedDirectories: scanned,
                 discoveredRepositories: repositories.count,
-                fractionCompleted: Double(scanned) / Double(scanned + pending.count)
+                fractionCompleted: lastFractionCompleted
             ))
         }
         return repositories.sorted { $0.path < $1.path }
