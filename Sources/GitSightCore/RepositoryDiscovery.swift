@@ -17,7 +17,8 @@ public struct RepositoryDiscovery {
 
     public func repositories(
         under rootURL: URL,
-        progress: (RepositoryDiscoveryProgress) -> Void = { _ in }
+        progress: (RepositoryDiscoveryProgress) -> Void = { _ in },
+        issue: (URL, NSError) -> Void = { _, _ in }
     ) throws -> [URL] {
         var pending: [URL] = [rootURL]
         var scanned = 0
@@ -33,26 +34,37 @@ public struct RepositoryDiscovery {
                 repositories.append(directoryURL)
             } else {
                 let children: [URL]?
-                if scanned == 1 {
+                do {
                     children = try FileManager.default.contentsOfDirectory(
                         at: directoryURL,
                         includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
                         options: []
                     )
-                } else {
-                    children = try? FileManager.default.contentsOfDirectory(
-                        at: directoryURL,
-                        includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
-                        options: []
-                    )
+                } catch {
+                    let nsError = error as NSError
+                    if scanned == 1 {
+                        throw NSError(
+                            domain: "GitSight.RepositoryDiscovery.Root",
+                            code: nsError.code,
+                            userInfo: [
+                                NSLocalizedDescriptionKey: "Чтение \(directoryURL.path): \(nsError.domain) \(nsError.code): \(nsError.localizedDescription)",
+                                NSUnderlyingErrorKey: error
+                            ]
+                        )
+                    }
+                    issue(directoryURL, nsError)
+                    children = nil
                 }
                 for child in (children ?? []).sorted(by: { $0.path < $1.path }) {
                     let name = child.lastPathComponent
                     guard !name.hasPrefix("."), !excludedDirectories.contains(name) else { continue }
-                    guard let values = try? child.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey]),
-                          values.isDirectory == true,
-                          values.isSymbolicLink != true else { continue }
-                    pending.append(child)
+                    do {
+                        let values = try child.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+                        guard values.isDirectory == true, values.isSymbolicLink != true else { continue }
+                        pending.append(child)
+                    } catch {
+                        issue(child, error as NSError)
+                    }
                 }
             }
             progress(RepositoryDiscoveryProgress(

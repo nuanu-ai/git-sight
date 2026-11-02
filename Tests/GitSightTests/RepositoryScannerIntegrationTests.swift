@@ -11,7 +11,8 @@ enum RepositoryScannerIntegrationTests {
         let validURL = rootURL.appendingPathComponent("valid")
         let brokenURL = rootURL.appendingPathComponent("broken")
         try FileManager.default.createDirectory(at: validURL, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: brokenURL.appendingPathComponent(".git"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: brokenURL, withIntermediateDirectories: true)
+        try "not a git repository\n".write(to: brokenURL.appendingPathComponent(".git"), atomically: true, encoding: .utf8)
         defer { try? FileManager.default.removeItem(at: rootURL) }
         try runGit(in: validURL, ["init", "-b", "main"])
         try runGit(in: validURL, ["config", "user.name", "Test User"])
@@ -22,8 +23,8 @@ enum RepositoryScannerIntegrationTests {
 
         var updates: [RepositoryScanProgress] = []
         let result = try RepositoryScanner().scan(under: rootURL) { updates.append($0) }
-        try expectEqual(result.repositories.map(\.path), [validURL], "valid repository survives another repository's failure")
-        try expectEqual(result.failures.map(\.path), [brokenURL], "broken repository is reported without cancelling the scan")
+        try expectEqual(result.repositories.map(\.path.path), [validURL.path], "valid repository survives another repository's failure")
+        try expectEqual(result.failures.map(\.path.path), [brokenURL.path], "broken repository is reported without cancelling the scan")
         try expectEqual(updates.last?.fractionCompleted, 1, "scan reaches a determinate finished state")
     }
 }

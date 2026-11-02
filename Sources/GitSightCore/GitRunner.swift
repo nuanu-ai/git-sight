@@ -23,7 +23,19 @@ struct GitRunner {
         ]) { _, new in new }
         process.environment = environment
 
-        try process.run()
+        do {
+            try process.run()
+        } catch {
+            let nsError = error as NSError
+            throw NSError(
+                domain: "GitSight.GitRunner.ProcessLaunch",
+                code: nsError.code,
+                userInfo: [
+                    NSLocalizedDescriptionKey: "git \(arguments.joined(separator: " ")) в \(repositoryURL.path): \(nsError.domain) \(nsError.code): \(nsError.localizedDescription)",
+                    NSUnderlyingErrorKey: error
+                ]
+            )
+        }
         let group = DispatchGroup()
         let queue = DispatchQueue(label: "GitSight.GitRunner.pipe", attributes: .concurrent)
         var output = Data()
