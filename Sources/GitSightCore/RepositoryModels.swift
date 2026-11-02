@@ -103,8 +103,20 @@ public struct CommitSnapshot: Equatable {
     public let parents: [String]
     public let refs: [String]
     public let lane: Int
+    /// The commit is outside the requested range and only marks where it starts, e.g. the fork point.
+    public let isBoundary: Bool
 
-    public init(fullHash: String, shortHash: String, subject: String, author: String, date: Date, parents: [String], refs: [String], lane: Int) {
+    public init(
+        fullHash: String,
+        shortHash: String,
+        subject: String,
+        author: String,
+        date: Date,
+        parents: [String],
+        refs: [String],
+        lane: Int,
+        isBoundary: Bool = false
+    ) {
         self.fullHash = fullHash
         self.shortHash = shortHash
         self.subject = subject
@@ -113,16 +125,7 @@ public struct CommitSnapshot: Equatable {
         self.parents = parents
         self.refs = refs
         self.lane = lane
-    }
-}
-
-public struct CommitEdge: Equatable {
-    public let from: String
-    public let to: String
-
-    public init(from: String, to: String) {
-        self.from = from
-        self.to = to
+        self.isBoundary = isBoundary
     }
 }
 
@@ -146,8 +149,6 @@ public struct RepositorySnapshot: Equatable {
     public let worktrees: [WorktreeSnapshot]
     public let branches: [BranchSnapshot]
     public let stashes: [StashSnapshot]
-    public let commits: [CommitSnapshot]
-    public let edges: [CommitEdge]
     public let remoteWebURL: URL?
     public let lastActivity: Date?
     public let hasRemote: Bool
@@ -165,8 +166,6 @@ public struct RepositorySnapshot: Equatable {
         worktrees: [WorktreeSnapshot] = [],
         branches: [BranchSnapshot] = [],
         stashes: [StashSnapshot] = [],
-        commits: [CommitSnapshot] = [],
-        edges: [CommitEdge] = [],
         remoteWebURL: URL? = nil,
         lastActivity: Date? = nil,
         hasRemote: Bool = true,
@@ -182,8 +181,6 @@ public struct RepositorySnapshot: Equatable {
         self.worktrees = worktrees
         self.branches = branches
         self.stashes = stashes
-        self.commits = commits
-        self.edges = edges
         self.remoteWebURL = remoteWebURL
         self.lastActivity = lastActivity
         self.hasRemote = hasRemote

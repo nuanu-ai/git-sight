@@ -19,13 +19,9 @@ public struct RepositoryInspector {
         let divergence = (ahead: currentBranchSnapshot?.ahead ?? 0, behind: currentBranchSnapshot?.behind ?? 0)
         // Stashes are shared by all worktrees, but `git stash` refuses to run in a bare repository.
         let stashes = try (isBare ? worktrees.first?.path : repositoryURL).map { try self.stashes(in: $0) } ?? []
-        let commits = try commits(in: repositoryURL)
-        let edges = commits.flatMap { commit in
-            commit.parents.map { CommitEdge(from: commit.fullHash, to: $0) }
-        }
         let remote = try git.optionalOutput(in: repositoryURL, ["remote", "get-url", "origin"], expectedStatus: 2)
         let hasRemote = try !git.output(in: repositoryURL, ["remote"]).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        let lastActivity = worktrees.compactMap(\.lastActivity).max() ?? commits.first?.date
+        let lastActivity = worktrees.compactMap(\.lastActivity).max()
         let assessment = RepositoryScore.evaluate(
             hasRemote: hasRemote,
             worktrees: worktrees,
@@ -43,8 +39,6 @@ public struct RepositoryInspector {
             worktrees: worktrees,
             branches: branches,
             stashes: stashes,
-            commits: commits,
-            edges: edges,
             remoteWebURL: remote.flatMap(webURL(from:)),
             lastActivity: lastActivity,
             hasRemote: hasRemote,
@@ -54,10 +48,75 @@ public struct RepositoryInspector {
     }
 
     public func changedFiles(in repositoryURL: URL, commit: CommitSnapshot) throws -> [CommitFileSnapshot] {
-        let result = try git.run(in: repositoryURL, [
+        try nameStatus(in: repositoryURL, [
             "diff-tree", "--no-commit-id", "--name-status", "-r", "--root", "--no-renames", "--diff-merges=first-parent",
             "--format=", "-z", commit.fullHash
         ])
+    }
+
+    /// Files a stash holds, including the untracked ones it saved.
+    public func stashFiles(in repositoryURL: URL, stash: String) throws -> [CommitFileSnapshot] {
+        try nameStatus(in: repositoryURL, [
+            "stash", "show", "--include-untracked", "--name-status", "--no-renames", "-z", stash
+        ])
+    }
+
+    /// Uncommitted files of one worktree; untracked files have status "?".
+    public func uncommittedFiles(in worktreeURL: URL) throws -> [CommitFileSnapshot] {
+        let result = try git.run(in: worktreeURL, [
+            "status", "--porcelain=v1", "--untracked-files=all", "-z"
+        ])
+        guard result.status == 0 else {
+            throw NSError(
+                domain: "GitSight.RepositoryInspector",
+                code: Int(result.status),
+                userInfo: [NSLocalizedDescriptionKey: result.standardError]
+            )
+        }
+        var files: [CommitFileSnapshot] = []
+        var skipOriginalPath = false
+        for record in result.standardOutput.split(separator: 0) {
+            if skipOriginalPath {
+                skipOriginalPath = false
+                continue
+            }
+            let code = String(decoding: record.prefix(2), as: UTF8.self)
+            skipOriginalPath = code.contains("R") || code.contains("C")
+            files.append(CommitFileSnapshot(
+                status: code == "??" ? "?" : String(code.first { $0 != " " } ?? "M"),
+                path: String(decoding: record.dropFirst(3), as: UTF8.self)
+            ))
+        }
+        return files
+    }
+
+    /// Commits `git log` reaches from `revisions`, newest first, with graph lanes.
+    /// Boundary commits mark where the range starts, e.g. what the server already has.
+    public func history(in repositoryURL: URL, revisions: [String]) throws -> [CommitSnapshot] {
+        let format = "%m%x1F%H%x1F%h%x1F%s%x1F%an%x1F%cI%x1F%P%x1F%D%x1E"
+        let output = try git.output(in: repositoryURL, [
+            "log", "--topo-order", "--boundary", "-n", "300", "--date=iso-strict", "--pretty=format:\(format)"
+        ] + revisions)
+        let commits = try Self.records(output).map { record in
+            let fields = Self.fields(record)
+            guard fields.count >= 8, let date = Self.date(from: fields[5]) else { throw Self.parseError(record) }
+            return CommitSnapshot(
+                fullHash: fields[1],
+                shortHash: fields[2],
+                subject: fields[3],
+                author: fields[4],
+                date: date,
+                parents: fields[6].split(whereSeparator: \.isWhitespace).map(String.init),
+                refs: fields[7].split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) },
+                lane: 0,
+                isBoundary: fields[0] == "-"
+            )
+        }
+        return Self.laidOut(commits)
+    }
+
+    private func nameStatus(in repositoryURL: URL, _ arguments: [String]) throws -> [CommitFileSnapshot] {
+        let result = try git.run(in: repositoryURL, arguments)
         guard result.status == 0 else {
             throw NSError(
                 domain: "GitSight.RepositoryInspector",
@@ -79,37 +138,18 @@ public struct RepositoryInspector {
     }
 
     private func dirtyFiles(in repositoryURL: URL) throws -> (count: Int, modifiedAt: Date?) {
-        let result = try git.run(in: repositoryURL, [
-            "status", "--porcelain=v1", "--untracked-files=all", "-z"
-        ])
-        guard result.status == 0 else {
-            throw NSError(
-                domain: "GitSight.RepositoryInspector",
-                code: Int(result.status),
-                userInfo: [NSLocalizedDescriptionKey: result.standardError]
-            )
-        }
-        var count = 0
+        let files = try uncommittedFiles(in: repositoryURL)
         var modifiedAt: Date?
-        var skipOriginalPath = false
-        for record in result.standardOutput.split(separator: 0) {
-            if skipOriginalPath {
-                skipOriginalPath = false
-                continue
-            }
-            let status = String(decoding: record.prefix(2), as: UTF8.self)
-            count += 1
-            skipOriginalPath = status.contains("R") || status.contains("C")
-            let path = String(decoding: record.dropFirst(3), as: UTF8.self)
+        for file in files {
             // A deleted file has no date of its own; deleting it updated its directory.
-            let fileURL = repositoryURL.appendingPathComponent(path)
+            let fileURL = repositoryURL.appendingPathComponent(file.path)
             let attributes = (try? FileManager.default.attributesOfItem(atPath: fileURL.path))
                 ?? (try? FileManager.default.attributesOfItem(atPath: fileURL.deletingLastPathComponent().path))
             if let date = attributes?[.modificationDate] as? Date {
                 modifiedAt = max(modifiedAt ?? date, date)
             }
         }
-        return (count, modifiedAt)
+        return (files.count, modifiedAt)
     }
 
     private func worktreeEntries(in repositoryURL: URL) throws -> [(path: URL, head: String?, branch: String?, isBare: Bool)] {
@@ -220,74 +260,11 @@ public struct RepositoryInspector {
         }
     }
 
-    private func commits(in repositoryURL: URL) throws -> [CommitSnapshot] {
-        guard try git.optionalOutput(in: repositoryURL, ["rev-parse", "--verify", "--quiet", "HEAD"]) != nil else {
-            return []
-        }
-        let format = "%H%x1F%h%x1F%s%x1F%an%x1F%cI%x1F%P%x1F%D%x1E"
-        func parseCommits(_ output: String) throws -> [CommitSnapshot] {
-            try Self.records(output).map { record in
-                let fields = Self.fields(record)
-                guard fields.count >= 7, let date = Self.date(from: fields[4]) else { throw Self.parseError(record) }
-                return CommitSnapshot(
-                    fullHash: fields[0],
-                    shortHash: fields[1],
-                    subject: fields[2],
-                    author: fields[3],
-                    date: date,
-                    parents: fields[5].split(whereSeparator: \.isWhitespace).map(String.init),
-                    refs: fields[6].split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) },
-                    lane: 0
-                )
-            }
-        }
-
-        let output = try git.output(in: repositoryURL, [
-            "log", "--all", "--topo-order", "-n", "100", "--date=iso-strict", "--pretty=format:\(format)"
-        ])
-        var parsedCommits = try parseCommits(output)
-        let branchTips = try git.output(in: repositoryURL, [
-            "for-each-ref", "--format=%(objectname)", "refs/heads"
-        ]).split(whereSeparator: \.isWhitespace).map(String.init)
-        let includedHashes = Set(parsedCommits.map(\.fullHash))
-        let missingTips = branchTips.filter { !includedHashes.contains($0) }
-        if !missingTips.isEmpty {
-            let tipOutput = try git.output(in: repositoryURL, [
-                "log", "--no-walk", "--date=iso-strict", "--pretty=format:\(format)"
-            ] + missingTips)
-            parsedCommits.append(contentsOf: try parseCommits(tipOutput))
-        }
-
-        func topologicallyOrdered(_ commits: [CommitSnapshot]) -> [CommitSnapshot] {
-            let rows = Dictionary(uniqueKeysWithValues: commits.enumerated().map { ($0.element.fullHash, $0.offset) })
-            var childCounts = Dictionary(uniqueKeysWithValues: commits.map { ($0.fullHash, 0) })
-            for commit in commits {
-                for parent in commit.parents where childCounts[parent] != nil {
-                    childCounts[parent]! += 1
-                }
-            }
-            var readyRows = commits.indices.filter { childCounts[commits[$0].fullHash] == 0 }
-            var ordered: [CommitSnapshot] = []
-            while !readyRows.isEmpty {
-                let row = readyRows.removeFirst()
-                let commit = commits[row]
-                ordered.append(commit)
-                for parent in commit.parents {
-                    guard let childCount = childCounts[parent], let parentRow = rows[parent] else { continue }
-                    childCounts[parent] = childCount - 1
-                    if childCount == 1 {
-                        readyRows.append(parentRow)
-                        readyRows.sort()
-                    }
-                }
-            }
-            guard ordered.count == commits.count else { return commits }
-            return ordered
-        }
-
+    /// Assigns each commit a graph lane; `commits` must list children before parents.
+    private static func laidOut(_ commits: [CommitSnapshot]) -> [CommitSnapshot] {
         var activeLanes: [String?] = []
         var laidOutCommits: [CommitSnapshot] = []
-        for commit in topologicallyOrdered(parsedCommits) {
+        for commit in commits {
             let matchingLanes = activeLanes.indices.filter { activeLanes[$0] == commit.fullHash }
             let lane = matchingLanes.first ?? activeLanes.firstIndex(of: nil) ?? activeLanes.count
             if lane == activeLanes.count {
@@ -318,7 +295,8 @@ public struct RepositoryInspector {
                 date: commit.date,
                 parents: commit.parents,
                 refs: commit.refs,
-                lane: lane
+                lane: lane,
+                isBoundary: commit.isBoundary
             ))
         }
         return laidOutCommits

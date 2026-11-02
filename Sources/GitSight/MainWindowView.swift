@@ -342,14 +342,8 @@ struct RepositoryDetailView: View {
             .padding(.top, 13)
             .padding(.bottom, 11)
             Divider().overlay(Theme.border)
-            HStack(spacing: 0) {
-                IssuePanel(model: model, repository: repository)
-                    .frame(width: 380)
-                Divider().overlay(Theme.border)
-                CommitGraphView(model: model, repository: repository)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            IssuePanel(model: model, repository: repository)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 }
