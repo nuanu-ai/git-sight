@@ -112,7 +112,9 @@ enum RepositoryInspectorIntegrationTests {
             ("unpushed work ages from in progress to critical", RepositoryScoringIntegrationTests.testUnpushedWorkAgesFromInProgressToCritical),
             ("old uncommitted work is risk while origin is still", RepositoryScoringIntegrationTests.testOldUncommittedWorkIsRiskWhileOriginIsStill),
             ("worktrees matter only for work they hold", RepositoryScoringIntegrationTests.testWorktreesMatterOnlyForWorkTheyHold),
-            ("repository without remote is flagged once", RepositoryScoringIntegrationTests.testRepositoryWithoutRemoteIsFlaggedOnce)
+            ("repository without remote is flagged once", RepositoryScoringIntegrationTests.testRepositoryWithoutRemoteIsFlaggedOnce),
+            ("branch deleted on the server is a notice", RepositoryScoringIntegrationTests.testBranchDeletedOnServerIsANotice),
+            ("bare repository with worktrees is one repository", RepositoryScannerIntegrationTests.testBareRepositoryWithWorktreesIsOneRepository)
         ] {
             await run(name: name, test, failures: &failures)
         }

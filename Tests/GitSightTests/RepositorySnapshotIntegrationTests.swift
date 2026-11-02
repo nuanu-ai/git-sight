@@ -124,6 +124,7 @@ enum RepositorySnapshotIntegrationTests {
         }
         try runGit(in: otherURL, ["push", "origin", "main"])
         try runGit(in: repositoryURL, ["fetch", "origin"])
+        try runGit(in: repositoryURL, ["tag", "main"])
 
         let snapshot = try RepositoryInspector().inspect(repositoryAt: repositoryURL)
         let main = snapshot.branches.first { $0.name == "main" }
@@ -131,6 +132,7 @@ enum RepositorySnapshotIntegrationTests {
         try expectEqual(main?.behind, 2, "checked-out branch sees its upstream move")
         try expectEqual(feature?.ahead, 0, "pushed feature has nothing ahead of its own upstream")
         try expectEqual(feature?.behind, 0, "feature is not compared with the checked-out branch's upstream")
+        try expectEqual(main?.hasWorktree, true, "a tag named like the branch does not break its worktree link")
     }
 
     static func testMissingLinkedWorktreeDoesNotHideRepository() throws {

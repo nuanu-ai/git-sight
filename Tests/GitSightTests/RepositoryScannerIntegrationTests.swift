@@ -82,4 +82,35 @@ enum RepositoryScannerIntegrationTests {
         try expectEqual(unexpectedResult == nil, true, "cancelled scan does not return a successful result")
         try expectEqual(unexpectedError == nil, true, "cancelled scan reports cancellation rather than a repository failure")
     }
+
+    static func testBareRepositoryWithWorktreesIsOneRepository() async throws {
+        let rootURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent(".build/GitSightTests/\(UUID().uuidString)", isDirectory: true)
+        let sourceURL = rootURL.appendingPathComponent("source")
+        let scanURL = rootURL.appendingPathComponent("scan")
+        let bareURL = scanURL.appendingPathComponent("project.git")
+        try FileManager.default.createDirectory(at: sourceURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: scanURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        try runGit(in: sourceURL, ["init", "-b", "main"])
+        try runGit(in: sourceURL, ["config", "user.name", "Test User"])
+        try runGit(in: sourceURL, ["config", "user.email", "test@example.com"])
+        try runGit(in: sourceURL, ["commit", "--allow-empty", "-m", "Initial"])
+        try runGit(in: scanURL, ["clone", "--bare", sourceURL.path, bareURL.path])
+        let worktreeURL = scanURL.appendingPathComponent("main")
+        try runGit(in: bareURL, ["worktree", "add", worktreeURL.path, "main"])
+        try "draft\n".write(to: worktreeURL.appendingPathComponent("draft.txt"), atomically: true, encoding: .utf8)
+
+        let result = try await RepositoryScanner().scan(under: scanURL)
+        try expectEqual(result.failures.map(\.message), [], "a bare repository with worktrees inspects without failures")
+        try expectEqual(result.repositories.count, 1, "the bare repository and its worktree are one repository")
+        try expectEqual(
+            result.repositories.first?.worktrees.map(\.dirtyFileCount),
+            [1],
+            "the worktree of a bare repository reports its uncommitted files"
+        )
+    }
 }

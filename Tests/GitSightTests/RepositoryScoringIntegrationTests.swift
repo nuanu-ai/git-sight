@@ -52,6 +52,28 @@ enum RepositoryScoringIntegrationTests {
 
         try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -4 * 24 * 60 * 60)], ofItemAtPath: fileURL.path)
         try expectEqual(try inspector.inspect(repositoryAt: fixture.repository).severity, .warning, "uncommitted files untouched for four days are abandoned")
+
+        let deletionFixture = try makeRepository()
+        defer { try? FileManager.default.removeItem(at: deletionFixture.root) }
+        try commit("old.txt", on: nil, in: deletionFixture.repository, environment: gitDate(daysAgo: 40))
+        try runGit(in: deletionFixture.repository, ["push", "origin", "main"])
+        try FileManager.default.removeItem(at: deletionFixture.repository.appendingPathComponent("old.txt"))
+        try expectEqual(try inspector.inspect(repositoryAt: deletionFixture.repository).severity, .attention, "a file deleted today is fresh work, whatever the age of its last commit")
+    }
+
+    static func testBranchDeletedOnServerIsANotice() throws {
+        let fixture = try makeRepository()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        try commit("feature.txt", on: "feature", in: fixture.repository, environment: gitDate(daysAgo: 40))
+        try runGit(in: fixture.repository, ["push", "-u", "origin", "feature"])
+        try runGit(in: fixture.repository, ["checkout", "main"])
+        // Squash-merging a pull request and deleting its branch leaves exactly this state locally.
+        try runGit(in: fixture.repository, ["push", "origin", "--delete", "feature"])
+        try runGit(in: fixture.repository, ["fetch", "--prune", "origin"])
+
+        let snapshot = try RepositoryInspector().inspect(repositoryAt: fixture.repository)
+        try expectEqual(snapshot.branches.first { $0.name == "feature" }?.unpushedCommits, 1, "the branch commit is on no remote ref")
+        try expectEqual(snapshot.severity, .attention, "a branch deleted on the server is most likely merged, so it is a notice rather than abandoned work")
     }
 
     static func testWorktreesMatterOnlyForWorkTheyHold() throws {
@@ -65,6 +87,15 @@ enum RepositoryScoringIntegrationTests {
         try runGit(in: fixture.repository, ["worktree", "add", cleanURL.path, "pushed"])
         let inspector = RepositoryInspector()
         try expectEqual(try inspector.inspect(repositoryAt: fixture.repository).severity, .clean, "an old worktree of a pushed branch holds nothing unsaved")
+
+        try runGit(in: fixture.repository, ["checkout", "--detach", "main"])
+        try commit("tagged.txt", on: nil, in: fixture.repository, environment: old)
+        try runGit(in: fixture.repository, ["tag", "v1"])
+        try runGit(in: fixture.repository, ["push", "origin", "v1"])
+        try runGit(in: fixture.repository, ["checkout", "main"])
+        let tagURL = fixture.root.appendingPathComponent("tag-worktree")
+        try runGit(in: fixture.repository, ["worktree", "add", "--detach", tagURL.path, "v1"])
+        try expectEqual(try inspector.inspect(repositoryAt: fixture.repository).severity, .clean, "a worktree detached at a tag on the server holds nothing unsaved")
 
         let detachedURL = fixture.root.appendingPathComponent("detached-worktree")
         try runGit(in: fixture.repository, ["worktree", "add", "--detach", detachedURL.path, "main"])
