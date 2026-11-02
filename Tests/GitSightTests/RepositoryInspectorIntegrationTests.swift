@@ -36,6 +36,11 @@ enum RepositoryInspectorIntegrationTests {
             RepositoryDiscoveryIntegrationTests.testFindsNestedRepositoriesAndLinkedWorktrees,
             failures: &failures
         )
+        run(
+            name: "inspector reports repository objects without changing filesystem",
+            RepositorySnapshotIntegrationTests.testReportsRepositoryObjectsWithoutChangingFilesystem,
+            failures: &failures
+        )
         if failures > 0 { exit(1) }
     }
 
