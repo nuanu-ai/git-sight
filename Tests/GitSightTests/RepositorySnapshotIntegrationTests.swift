@@ -87,6 +87,52 @@ enum RepositorySnapshotIntegrationTests {
         try expectEqual(fingerprintAfter, fingerprintBefore, "inspection leaves every repository file and directory unchanged")
     }
 
+    static func testEachBranchIsComparedWithItsOwnUpstream() throws {
+        let rootURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent(".build/GitSightTests/\(UUID().uuidString)", isDirectory: true)
+        let originURL = rootURL.appendingPathComponent("origin.git")
+        let repositoryURL = rootURL.appendingPathComponent("repository")
+        let otherURL = rootURL.appendingPathComponent("other")
+        try FileManager.default.createDirectory(at: repositoryURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        try runGit(in: rootURL, ["init", "--bare", originURL.path])
+        try runGit(in: repositoryURL, ["init", "-b", "main"])
+        try runGit(in: repositoryURL, ["config", "user.name", "Test User"])
+        try runGit(in: repositoryURL, ["config", "user.email", "test@example.com"])
+        try "initial\n".write(to: repositoryURL.appendingPathComponent("tracked.txt"), atomically: true, encoding: .utf8)
+        try runGit(in: repositoryURL, ["add", "tracked.txt"])
+        try runGit(in: repositoryURL, ["commit", "-m", "Initial"])
+        try runGit(in: repositoryURL, ["remote", "add", "origin", originURL.path])
+        try runGit(in: repositoryURL, ["push", "-u", "origin", "main"])
+        try runGit(in: repositoryURL, ["checkout", "-b", "feature"])
+        try "feature\n".write(to: repositoryURL.appendingPathComponent("feature.txt"), atomically: true, encoding: .utf8)
+        try runGit(in: repositoryURL, ["add", "feature.txt"])
+        try runGit(in: repositoryURL, ["commit", "-m", "Pushed feature"])
+        try runGit(in: repositoryURL, ["push", "-u", "origin", "feature"])
+        try runGit(in: repositoryURL, ["checkout", "main"])
+
+        try runGit(in: rootURL, ["clone", originURL.path, otherURL.path])
+        try runGit(in: otherURL, ["config", "user.name", "Other User"])
+        try runGit(in: otherURL, ["config", "user.email", "other@example.com"])
+        for number in 1...2 {
+            try "\(number)\n".write(to: otherURL.appendingPathComponent("origin-\(number).txt"), atomically: true, encoding: .utf8)
+            try runGit(in: otherURL, ["add", "."])
+            try runGit(in: otherURL, ["commit", "-m", "Origin movement \(number)"])
+        }
+        try runGit(in: otherURL, ["push", "origin", "main"])
+        try runGit(in: repositoryURL, ["fetch", "origin"])
+
+        let snapshot = try RepositoryInspector().inspect(repositoryAt: repositoryURL)
+        let main = snapshot.branches.first { $0.name == "main" }
+        let feature = snapshot.branches.first { $0.name == "feature" }
+        try expectEqual(main?.behind, 2, "checked-out branch sees its upstream move")
+        try expectEqual(feature?.ahead, 0, "pushed feature has nothing ahead of its own upstream")
+        try expectEqual(feature?.behind, 0, "feature is not compared with the checked-out branch's upstream")
+    }
+
     static func testMissingLinkedWorktreeDoesNotHideRepository() throws {
         let repositoryURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

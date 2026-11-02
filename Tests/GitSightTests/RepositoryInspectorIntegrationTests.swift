@@ -37,8 +37,13 @@ enum RepositoryInspectorIntegrationTests {
             failures: &failures
         )
         run(
-            name: "gone upstream is not reported as zero divergence",
-            GitSafetyIntegrationTests.testGoneUpstreamIsNotReportedAsZeroDivergence,
+            name: "gone upstream does not hide repository",
+            GitSafetyIntegrationTests.testGoneUpstreamDoesNotHideRepository,
+            failures: &failures
+        )
+        run(
+            name: "each branch is compared with its own upstream",
+            RepositorySnapshotIntegrationTests.testEachBranchIsComparedWithItsOwnUpstream,
             failures: &failures
         )
         run(name: "inspector reports untracked files", testInspectorReportsUntrackedFilesInRepository, failures: &failures)

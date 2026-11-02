@@ -28,7 +28,7 @@ enum GitSafetyIntegrationTests {
         try expectEqual(FileManager.default.fileExists(atPath: markerURL.path), false, "read-only inspection must not execute repository-controlled fsmonitor hooks")
     }
 
-    static func testGoneUpstreamIsNotReportedAsZeroDivergence() throws {
+    static func testGoneUpstreamDoesNotHideRepository() throws {
         let repositoryURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -45,21 +45,13 @@ enum GitSafetyIntegrationTests {
         try runGit(in: repositoryURL, ["add", "tracked.txt"])
         try runGit(in: repositoryURL, ["commit", "-m", "Initial"])
 
-        var inspectionError: NSError?
-        do {
-            _ = try RepositoryInspector().inspect(repositoryAt: repositoryURL)
-        } catch {
-            inspectionError = error as NSError
-        }
-        try expectEqual(
-            inspectionError?.localizedDescription.contains("not stored as a remote-tracking branch"),
-            true,
-            "a configured but missing upstream is an explicit error, not trustworthy zero divergence"
-        )
-        try expectEqual(
-            inspectionError?.localizedDescription.contains(repositoryURL.path),
-            true,
-            "Git failure identifies the repository that needs attention"
-        )
+        try runGit(in: repositoryURL, ["branch", "side"])
+        try runGit(in: repositoryURL, ["config", "branch.side.remote", "origin"])
+        try runGit(in: repositoryURL, ["config", "branch.side.merge", "refs/heads/side"])
+
+        // A branch deleted on the server after its PR is merged is routine, so it must stay visible.
+        let snapshot = try RepositoryInspector().inspect(repositoryAt: repositoryURL)
+        try expectEqual(snapshot.branches.map(\.name), ["main", "side"], "branches with a deleted upstream stay visible")
+        try expectEqual(snapshot.currentBranch, "main", "repository with a deleted upstream on HEAD is still inspected")
     }
 }
