@@ -55,4 +55,29 @@ enum CommitTopologyIntegrationTests {
         try expectEqual(repeatedSnapshot.commits, snapshot.commits, "commit rails remain stable across inspection")
         try expectEqual(repeatedSnapshot.edges, snapshot.edges, "parent edges remain stable across inspection")
     }
+
+    static func testHistoryIncludesWorkOutsideCurrentBranch() throws {
+        let repositoryURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent(".build/GitSightTests/\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: repositoryURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: repositoryURL) }
+        try runGit(in: repositoryURL, ["init", "-b", "main"])
+        try runGit(in: repositoryURL, ["config", "user.name", "Test User"])
+        try runGit(in: repositoryURL, ["config", "user.email", "test@example.com"])
+        try "initial\n".write(to: repositoryURL.appendingPathComponent("tracked.txt"), atomically: true, encoding: .utf8)
+        try runGit(in: repositoryURL, ["add", "tracked.txt"])
+        try runGit(in: repositoryURL, ["commit", "-m", "Initial"])
+        try runGit(in: repositoryURL, ["checkout", "-b", "side"])
+        try "side\n".write(to: repositoryURL.appendingPathComponent("side.txt"), atomically: true, encoding: .utf8)
+        try runGit(in: repositoryURL, ["add", "side.txt"])
+        try runGit(in: repositoryURL, ["commit", "-m", "Side branch only"])
+        try runGit(in: repositoryURL, ["checkout", "main"])
+
+        let snapshot = try RepositoryInspector().inspect(repositoryAt: repositoryURL)
+        try expectEqual(snapshot.currentBranch, "main", "fixture is viewed from the main branch")
+        try expectEqual(snapshot.commits.contains { $0.subject == "Side branch only" }, true, "graph includes work that exists only on another branch")
+    }
 }

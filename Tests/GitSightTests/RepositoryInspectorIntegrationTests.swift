@@ -48,6 +48,11 @@ enum RepositoryInspectorIntegrationTests {
             failures: &failures
         )
         run(
+            name: "history includes work outside the current branch",
+            CommitTopologyIntegrationTests.testHistoryIncludesWorkOutsideCurrentBranch,
+            failures: &failures
+        )
+        run(
             name: "inspector reports files changed by selected commit",
             ChangedFilesIntegrationTests.testReportsFilesChangedBySelectedCommit,
             failures: &failures
