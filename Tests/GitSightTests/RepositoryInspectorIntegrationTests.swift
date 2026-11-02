@@ -43,6 +43,11 @@ enum RepositoryInspectorIntegrationTests {
             failures: &failures
         )
         run(
+            name: "missing linked worktree does not hide repository",
+            RepositorySnapshotIntegrationTests.testMissingLinkedWorktreeDoesNotHideRepository,
+            failures: &failures
+        )
+        run(
             name: "commit topology has stable parent edges and distinct rails",
             CommitTopologyIntegrationTests.testMergeCommitHasStableParentEdgesAndDistinctRails,
             failures: &failures

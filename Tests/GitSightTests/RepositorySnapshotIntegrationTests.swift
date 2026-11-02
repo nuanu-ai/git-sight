@@ -86,6 +86,29 @@ enum RepositorySnapshotIntegrationTests {
         try expectEqual(snapshot.lastActivity, snapshot.commits.first?.date, "repository reports latest commit activity")
         try expectEqual(fingerprintAfter, fingerprintBefore, "inspection leaves every repository file and directory unchanged")
     }
+
+    static func testMissingLinkedWorktreeDoesNotHideRepository() throws {
+        let repositoryURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent(".build/GitSightTests/\(UUID().uuidString)", isDirectory: true)
+        let linkedURL = repositoryURL.deletingLastPathComponent().appendingPathComponent("linked-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: repositoryURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: repositoryURL.deletingLastPathComponent()) }
+        try runGit(in: repositoryURL, ["init", "-b", "main"])
+        try runGit(in: repositoryURL, ["config", "user.name", "Test User"])
+        try runGit(in: repositoryURL, ["config", "user.email", "test@example.com"])
+        try "initial\n".write(to: repositoryURL.appendingPathComponent("tracked.txt"), atomically: true, encoding: .utf8)
+        try runGit(in: repositoryURL, ["add", "tracked.txt"])
+        try runGit(in: repositoryURL, ["commit", "-m", "Initial"])
+        try runGit(in: repositoryURL, ["worktree", "add", "--detach", linkedURL.path])
+        try FileManager.default.removeItem(at: linkedURL)
+
+        let snapshot = try RepositoryInspector().inspect(repositoryAt: repositoryURL)
+        try expectEqual(snapshot.name, repositoryURL.lastPathComponent, "repository remains inspectable")
+        try expectEqual(snapshot.worktrees.map(\.path), [repositoryURL], "missing worktree is omitted without pruning repository metadata")
+    }
 }
 
 private func filesystemFingerprint(of rootURL: URL) throws -> String {
