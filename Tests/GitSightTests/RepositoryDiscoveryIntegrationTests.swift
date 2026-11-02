@@ -33,7 +33,8 @@ enum RepositoryDiscoveryIntegrationTests {
             "Projects/alpha/nested",
             ".hidden/gamma",
             "node_modules/delta",
-            ".build/epsilon"
+            ".build/epsilon",
+            "Library/zeta"
         ] {
             let repositoryURL = rootURL.appendingPathComponent(relativePath, isDirectory: true)
             try fileManager.createDirectory(at: repositoryURL, withIntermediateDirectories: true)
