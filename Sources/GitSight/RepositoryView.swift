@@ -490,19 +490,19 @@ private struct GraphPane: View {
                 SelectionHeader(model: model, repository: repository, place: place)
                 Divider()
             }
-            if let file = model.diffFile {
-                GeometryReader { geometry in
-                    VStack(spacing: 0) {
-                        graph
-                            .frame(height: geometry.size.height * (1 - diffFraction))
+            // One graph whether the diff is open or not: moving it into another container would rebuild
+            // its scroll view, which then jumped back to the top on the first file opened.
+            GeometryReader { geometry in
+                VStack(spacing: 0) {
+                    graph
+                        .frame(height: model.diffFile == nil ? geometry.size.height : geometry.size.height * (1 - diffFraction))
+                    if let file = model.diffFile {
                         PaneDivider(fraction: $diffFraction, height: geometry.size.height)
                         DiffPane(file: file, diff: model.fileDiff, error: model.fileDiffError, close: model.closeDiff)
                     }
                 }
-                .coordinateSpace(name: PaneDivider.space)
-            } else {
-                graph
             }
+            .coordinateSpace(name: PaneDivider.space)
         }
         .background(.background)
         .onExitCommand { model.closeDiff() }
