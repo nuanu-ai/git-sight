@@ -125,10 +125,14 @@ public struct RepositoryInspector {
     public func repositoryHistory(in repositoryURL: URL) throws -> [CommitSnapshot] {
         // Linked worktrees on no branch hold commits no ref reaches, often an agent's.
         // The first entry is the main worktree, whose HEAD the history reads anyway, or a bare repository.
+        // A worktree folder deleted by hand is skipped, as inspect skips it.
         let detached = try worktreeEntries(in: repositoryURL).dropFirst().compactMap { entry in
-            entry.branch == nil ? entry.head.map { (name: entry.path.lastPathComponent, head: $0) } : nil
+            entry.branch == nil && FileManager.default.fileExists(atPath: entry.path.path)
+                ? entry.head.map { (name: entry.path.lastPathComponent, head: $0) } : nil
         }
-        let tips = ["--branches", "HEAD"] + detached.map(\.head)
+        // An orphan branch with no commits yet leaves HEAD pointing nowhere, and naming it would fail the log.
+        let head = try git.optionalOutput(in: repositoryURL, ["rev-parse", "--verify", "--quiet", "HEAD"]) == nil ? [] : ["HEAD"]
+        let tips = ["--branches"] + head + detached.map(\.head)
         var commits = try history(in: repositoryURL, revisions: tips + ["--remotes", "--tags"])
         for (name, head) in detached {
             if let index = commits.firstIndex(where: { $0.fullHash == head }) {
@@ -148,7 +152,8 @@ public struct RepositoryInspector {
 
     /// Reads %D written with --decorate=full, e.g. "HEAD -> refs/heads/main, refs/remotes/origin/main, tag: refs/tags/v1".
     static func refs(_ decoration: String) -> [CommitRef] {
-        decoration.split(separator: ",").compactMap { part in
+        // Entries are separated by ", "; a ref name may contain a comma but never a space.
+        decoration.components(separatedBy: ", ").compactMap { part in
             var name = part.trimmingCharacters(in: .whitespaces)
             let isHead = name.hasPrefix("HEAD -> ")
             if isHead { name.removeFirst("HEAD -> ".count) }
