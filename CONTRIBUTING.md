@@ -37,6 +37,19 @@ Review is required when any of these apply:
 
 Routine copy edits, formatting, mechanical renames, and small isolated fixes with regression proof do not need a separate adversarial review. Size does not exempt a risky change.
 
+## Interface rules
+
+Every rule here comes from a mistake that already shipped once.
+
+- **One grid per list.** Headers and rows in a list share their columns: a fixed-width leading column for the dot, icon or chevron, then the text, then numbers on the right. The widths live in one place (`SidebarGrid` for the sidebar) and every row type uses them. Do not use a list's section headers for anything that must line up with the rows: SwiftUI insets them differently.
+- **No backgrounds that fight the selection.** A tint or band inside a list has to match the system selection's insets exactly, or it goes.
+- **Numbers line up on the right.** Use monospaced digits and a shared trailing edge, so ages and counts read as a column.
+- **Nothing moves under the pointer.** A control keeps its size when its state changes. Confirmation swaps an icon; it does not change the label.
+- **Say each thing once.** A row does not show the same time or count twice, and a header does not repeat what the badge next to it says.
+- **Spacing comes in steps** of 2, 4, 8, 12 and 16 pt. A group gets more space above it than between its rows.
+- **Match the reference, then stop.** When a view copies a known tool, such as the VS Code commit graph, take its density and its content, and add only what git-sight needs that the tool lacks.
+- **Look before calling it done.** Render every changed view in light and dark, at the default and the narrowest width (`Scripts/render_window.sh`). The sidebar and toolbar do not draw offscreen, so check them in the running app.
+
 ## Checks
 
 Run the tests and relevant focused checks before every green commit. Run `git diff --check` before committing. Keep build artifacts and mutation reports out of version control.
