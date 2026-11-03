@@ -43,7 +43,7 @@ struct CommitGraph: View {
             let rows = Dictionary(uniqueKeysWithValues: commits.enumerated().map { ($0.element.fullHash, $0.offset) })
             for (row, commit) in commits.enumerated() where !commit.isBoundary {
                 let start = point(row: row, lane: commit.lane)
-                for parentHash in commit.parents {
+                for (offset, parentHash) in commit.parents.enumerated() {
                     var path = Path()
                     path.move(to: start)
                     if let parentRow = rows[parentHash] {
@@ -51,8 +51,18 @@ struct CommitGraph: View {
                         let end = point(row: parentRow, lane: parentLane)
                         if parentLane == commit.lane {
                             path.addLine(to: end)
+                        } else if offset == 0 {
+                            // The child's lane is held for its first parent, so follow it down
+                            // and join the parent's line in the gap just above the parent.
+                            let bend = CGPoint(x: start.x, y: end.y - Self.rowHeight)
+                            path.addLine(to: bend)
+                            path.addCurve(
+                                to: end,
+                                control1: CGPoint(x: bend.x, y: bend.y + Self.rowHeight * 0.6),
+                                control2: CGPoint(x: end.x, y: end.y - Self.rowHeight * 0.6)
+                            )
                         } else {
-                            // Bend within the gap below the child, then follow the parent's rail.
+                            // A merge's other parent: bend within the gap below the child, then follow the parent's rail.
                             let bend = CGPoint(x: end.x, y: start.y + Self.rowHeight)
                             path.addCurve(
                                 to: bend,

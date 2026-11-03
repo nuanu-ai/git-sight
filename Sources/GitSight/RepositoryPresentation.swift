@@ -52,7 +52,7 @@ enum RepositoryText {
         NSString(string: url.path).abbreviatingWithTildeInPath
     }
 
-    private static func counted(_ value: Int, one: String, few: String, many: String) -> String {
+    static func counted(_ value: Int, one: String, few: String, many: String) -> String {
         let remainder100 = value % 100
         let remainder10 = value % 10
         let word: String
@@ -95,7 +95,7 @@ extension Severity {
 }
 
 /// One piece of work that exists only on this machine.
-struct Finding: Identifiable, Hashable {
+struct Finding: Identifiable {
     enum Kind: Hashable {
         case uncommitted
         case branch
@@ -119,6 +119,7 @@ struct Finding: Identifiable, Hashable {
     let date: Date?
     let location: URL
     let source: Source
+    let work: UnsavedWork
     let severity: Severity
     /// Why it has that severity, in a few words.
     let reason: String
@@ -135,12 +136,13 @@ struct Finding: Identifiable, Hashable {
         self.date = date
         self.location = location
         self.source = source
+        work = verdict.work
         let lastChanged = verdict.lastChanged ?? Date()
         severity = Severity(of: verdict.work, lastChanged: lastChanged)
         if severity >= .warning {
             reason = "\(RepositoryText.age(lastChanged)) без движения"
         } else if verdict.work == .commits(upstreamGone: true) {
-            reason = "ветку удалили на сервере"
+            reason = "вероятно, уже влита"
         } else {
             reason = "изменено \(RepositoryText.ago(lastChanged))"
         }
@@ -181,7 +183,7 @@ extension RepositorySnapshot {
                     kind: .branch,
                     title: branch.name,
                     detail: "нет на сервере: \(RepositoryText.commits(branch.unpushedCommits))",
-                    note: branch.upstreamGone ? "удалена на сервере, вероятно влита" : nil,
+                    note: branch.upstreamGone ? "удалена на сервере" : nil,
                     date: branch.lastCommitDate,
                     location: worktrees.first { $0.branch == branch.name }?.path ?? path,
                     source: .history(directory: path, revisions: ["refs/heads/\(branch.name)", "--not", "--remotes"]),
@@ -230,19 +232,24 @@ extension RepositorySnapshot {
 
     /// Why the repository has its severity: the reason of its oldest worst finding.
     var reason: String {
-        let worst = findings.filter { $0.severity == severity }.first
+        // A branch the server deleted is only a notice; any other work explains the verdict better.
+        let candidates = findings.filter { $0.severity == severity }
+        let worst = candidates.first { $0.work != .commits(upstreamGone: true) } ?? candidates.first
         return worst?.reason ?? (hasRemote ? "всё на сервере" : "нет remote, история только на этом компьютере")
     }
 
     /// One line for the sidebar: what is at stake.
     var summary: String {
-        let findings = findings
         var parts: [String] = []
         let files = worktrees.reduce(0) { $0 + $1.dirtyFileCount }
         if files > 0 { parts.append("\(RepositoryText.files(files)) не закоммичено") }
-        let unpushed = findings.filter { $0.kind == .branch || $0.kind == .detached }.count
-        if unpushed > 0 { parts.append("\(unpushed) не на сервере") }
-        if !stashes.isEmpty { parts.append("стэшей: \(stashes.count)") }
+        let unpushedBranches = hasRemote ? branches.filter { $0.unpushedCommits > 0 }.count : 0
+        if unpushedBranches > 0 {
+            parts.append("\(RepositoryText.counted(unpushedBranches, one: "ветка", few: "ветки", many: "веток")) не на сервере")
+        }
+        let detached = worktrees.filter { $0.unpushedCommits > 0 }.count
+        if detached > 0 { parts.append("\(detached) ворктри с коммитами вне веток") }
+        if !stashes.isEmpty { parts.append(RepositoryText.counted(stashes.count, one: "стэш", few: "стэша", many: "стэшей")) }
         if !hasRemote { parts.append("нет remote") }
         return parts.isEmpty ? "всё на сервере" : parts.joined(separator: " · ")
     }
