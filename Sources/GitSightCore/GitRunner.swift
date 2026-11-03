@@ -187,20 +187,14 @@ struct GitRunner {
         )
     }
 
-    /// /usr/bin/git is xcrun's shim: it looks up the developer folder anew on every call,
-    /// which doubled the cost of each of a scan's thousand calls. Looked up once instead.
+    /// /usr/bin/git is xcrun's shim: it looks up the developer folder anew on every call, which doubled
+    /// the cost of each of a scan's thousand calls. The folder is read once here, where the shim reads it:
+    /// DEVELOPER_DIR, else the one xcode-select chose. Anything else still goes through the shim.
     private static let executable: String = {
-        let xcrun = Process()
-        let pipe = Pipe()
-        xcrun.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
-        xcrun.arguments = ["--find", "git"]
-        xcrun.standardOutput = pipe
-        xcrun.standardError = FileHandle.nullDevice
-        guard (try? xcrun.run()) != nil else { return "/usr/bin/git" }
-        let path = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        xcrun.waitUntilExit()
-        return xcrun.terminationStatus == 0 && FileManager.default.isExecutableFile(atPath: path) ? path : "/usr/bin/git"
+        let folder = ProcessInfo.processInfo.environment["DEVELOPER_DIR"]
+            ?? (try? FileManager.default.destinationOfSymbolicLink(atPath: "/var/db/xcode_select_link"))
+        let git = folder.map { $0 + "/usr/bin/git" }
+        return git.flatMap { FileManager.default.isExecutableFile(atPath: $0) ? $0 : nil } ?? "/usr/bin/git"
     }()
 
     private static func event(_ identifier: Int32, _ filter: Int32, _ flags: Int32, fflags: UInt32 = 0) -> kevent {
@@ -253,7 +247,15 @@ struct GitRunner {
         try output(from: run(in: repositoryURL, arguments, config: config), in: repositoryURL, arguments)
     }
 
+    func data(in repositoryURL: URL, _ arguments: [String]) throws -> Data {
+        try checked(run(in: repositoryURL, arguments), in: repositoryURL, arguments)
+    }
+
     func output(from result: GitResult, in repositoryURL: URL, _ arguments: [String]) throws -> String {
+        String(decoding: try checked(result, in: repositoryURL, arguments), as: UTF8.self)
+    }
+
+    private func checked(_ result: GitResult, in repositoryURL: URL, _ arguments: [String]) throws -> Data {
         guard result.status == 0 else {
             let details = result.standardError.trimmingCharacters(in: .whitespacesAndNewlines)
             throw NSError(
@@ -262,7 +264,7 @@ struct GitRunner {
                 userInfo: [NSLocalizedDescriptionKey: "git \(arguments.joined(separator: " ")) в \(repositoryURL.path): статус \(result.status): \(details.isEmpty ? "без сообщения" : details)"]
             )
         }
-        return String(decoding: result.standardOutput, as: UTF8.self)
+        return result.standardOutput
     }
 
     func optionalOutput(in repositoryURL: URL, _ arguments: [String], expectedStatus: Int32 = 1) throws -> String? {

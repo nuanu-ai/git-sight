@@ -6,33 +6,36 @@ public struct RepositoryInspector {
     public init() {}
 
     public func inspect(repositoryAt repositoryURL: URL) throws -> RepositorySnapshot {
-        let currentBranch = try git.optionalOutput(in: repositoryURL, [
-            "symbolic-ref", "--quiet", "--short", "HEAD"
-        ])?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let isBare = try git.output(in: repositoryURL, ["rev-parse", "--is-bare-repository"])
-            .trimmingCharacters(in: .whitespacesAndNewlines) == "true"
-        let dirtyFileCount = isBare ? 0 : try dirtyFiles(in: repositoryURL).count
-        let worktreeEntries = try worktreeEntries(in: repositoryURL)
-        let base = try base(in: repositoryURL)
-        let branches = try branches(in: repositoryURL, checkedOut: Set(worktreeEntries.compactMap(\.branch)), base: base)
-        let worktrees = try worktrees(worktreeEntries, in: repositoryURL, branches: branches)
+        let config = try config(in: repositoryURL)
+        let refs = try refs(in: repositoryURL)
+        let worktreeEntries = try worktreeEntries(in: repositoryURL, head: refs.head, config: config)
+        // The first entry is the repository itself: its main worktree, or a bare repository.
+        let isBare = worktreeEntries.first?.isBare ?? false
+        // git remote also finds remotes in the files of git's first years; only an empty config needs it to look.
+        let hasRemote = try !config.remotes.isEmpty
+            || !git.output(in: repositoryURL, ["remote"]).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let branches = try branches(
+            refs.branches, in: repositoryURL, hasRemote: hasRemote,
+            checkedOut: Set(worktreeEntries.compactMap(\.branch)), base: refs.base
+        )
+        let worktrees = try worktrees(worktreeEntries, in: repositoryURL, branches: branches, mainFilters: config.filtersOff)
+        // A bare repository has no worktree of its own; its HEAD still names a branch.
+        let currentBranch = isBare ? refs.head?.name : worktreeEntries.first?.branch
         let currentBranchSnapshot = branches.first { $0.name == currentBranch }
         let divergence = (ahead: currentBranchSnapshot?.ahead ?? 0, behind: currentBranchSnapshot?.behind ?? 0)
         // Stashes are shared by all worktrees, but `git stash` refuses to run in a bare repository.
-        let stashes = try (isBare ? worktrees.first?.path : repositoryURL).map { try self.stashes(in: $0) } ?? []
-        let remote = try git.optionalOutput(in: repositoryURL, ["remote", "get-url", "origin"], expectedStatus: 2)
-        let hasRemote = try !git.output(in: repositoryURL, ["remote"]).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let stashes = refs.hasStash ? try (isBare ? worktrees.first?.path : repositoryURL).map { try self.stashes(in: $0) } ?? [] : []
         let lastActivity = worktrees.compactMap(\.lastActivity).max()
         let assessment = RepositoryScore.evaluate(
             hasRemote: hasRemote,
-            hasBase: base != nil,
+            hasBase: refs.base != nil,
             worktrees: worktrees,
             branches: branches,
             stashes: stashes
         )
 
         return RepositorySnapshot(
-            dirtyFileCount: dirtyFileCount,
+            dirtyFileCount: worktrees.first { $0.isMain }?.dirtyFileCount ?? 0,
             path: repositoryURL,
             name: repositoryURL.lastPathComponent,
             currentBranch: currentBranch,
@@ -41,10 +44,10 @@ public struct RepositoryInspector {
             worktrees: worktrees,
             branches: branches,
             stashes: stashes,
-            remoteWebURL: remote.flatMap(webURL(from:)),
+            remoteWebURL: config.origin.flatMap(webURL(from:)),
             lastActivity: lastActivity,
             hasRemote: hasRemote,
-            baseBranch: base?.name,
+            baseBranch: refs.base?.name,
             oldestUnsavedWork: assessment.oldestUnsavedWork,
             severity: assessment.severity
         )
@@ -164,27 +167,60 @@ public struct RepositoryInspector {
     /// command when it compares a changed file with the index, so status and diff would otherwise run it.
     /// Filters from the user's global and system config, such as Git LFS, are the user's and stay on.
     private func filtersOff(in worktreeURL: URL) throws -> [(key: String, value: String)] {
-        let keys = try git.optionalOutput(in: worktreeURL, [
-            "config", "--show-scope", "--name-only", "--get-regexp", #"^filter\..*\.(clean|smudge|process|required)$"#
+        try config(in: worktreeURL).filtersOff
+    }
+
+    /// What inspect reads from config, in one call: the filters to turn off, the remotes, origin's URL as
+    /// git remote get-url gives it, and whether core.bare may make the repository bare.
+    private func config(in worktreeURL: URL) throws -> (filtersOff: [(key: String, value: String)], remotes: Set<String>, origin: String?, mayBeBare: Bool) {
+        // "<scope>\0<key>\n<value>\0" for each entry; a key set with no value has no newline.
+        let output = try git.optionalOutput(in: worktreeURL, [
+            "config", "-z", "--show-scope", "--get-regexp", #"^(filter\..*\.(clean|smudge|process|required)|remote\..+\..+|url\..+\.insteadof|core\.bare)$"#
         ]) ?? ""
-        // "local\tfilter.<driver>.clean", where the driver's name may be empty or contain dots.
-        let drivers = Set(keys.split(separator: "\n").compactMap { line -> String? in
-            let fields = line.split(separator: "\t", maxSplits: 1)
-            guard fields.count == 2, fields[0] != "global", fields[0] != "system" else { return nil }
-            return fields[1].split(separator: ".", omittingEmptySubsequences: false).dropFirst().dropLast().joined(separator: ".")
-        })
-        return drivers.sorted().flatMap { driver in
+        let tokens = output.split(separator: "\0", omittingEmptySubsequences: false)
+        var drivers: Set<String> = []
+        var remotes: Set<String> = []
+        var origin: String?
+        var rewrites: [(base: String, prefix: String)] = []
+        var mayBeBare = false
+        for index in stride(from: 0, to: tokens.count - 1, by: 2) {
+            let entry = tokens[index + 1].split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
+            let key = entry[0]
+            let value = entry.count > 1 ? String(entry[1]) : nil
+            // "<section>.<subsection>.<name>", where the subsection may be empty or contain dots.
+            let subsection = key.split(separator: ".", omittingEmptySubsequences: false).dropFirst().dropLast().joined(separator: ".")
+            if key.hasPrefix("filter.") {
+                if tokens[index] != "global", tokens[index] != "system" { drivers.insert(subsection) }
+            } else if key.hasPrefix("remote.") {
+                remotes.insert(subsection)
+                if key == "remote.origin.url", origin == nil { origin = value }
+            } else if key.hasPrefix("url.") {
+                rewrites.append((subsection, value ?? ""))
+            } else {
+                mayBeBare = mayBeBare || !["false", "no", "off", "0"].contains(value?.lowercased() ?? "true")
+            }
+        }
+        // url.<base>.insteadOf: the longest prefix that matches is replaced by its base; the first of equals wins.
+        if let url = origin, let rewrite = rewrites.filter({ url.hasPrefix($0.prefix) }).max(by: { $0.prefix.count < $1.prefix.count }) {
+            origin = rewrite.base + url.dropFirst(rewrite.prefix.count)
+        }
+        let filtersOff = drivers.sorted().flatMap { driver in
             ["clean", "smudge", "process"].map { (key: "filter.\(driver).\($0)", value: "") }
                 + [(key: "filter.\(driver).required", value: "false")]
         }
+        return (filtersOff, remotes, origin, mayBeBare)
     }
 
     /// Uncommitted files of one worktree; untracked files have status "?".
     public func uncommittedFiles(in worktreeURL: URL) throws -> [CommitFileSnapshot] {
+        try uncommittedFiles(in: worktreeURL, filtersOff: filtersOff(in: worktreeURL))
+    }
+
+    private func uncommittedFiles(in worktreeURL: URL, filtersOff: [(key: String, value: String)]) throws -> [CommitFileSnapshot] {
         // A submodule's own worktree is not looked into: its config and filters are its own.
         let result = try git.run(in: worktreeURL, [
             "status", "--porcelain=v1", "--untracked-files=all", "--ignore-submodules=dirty", "-z"
-        ], config: filtersOff(in: worktreeURL))
+        ], config: filtersOff)
         guard result.status == 0 else {
             throw NSError(
                 domain: "GitSight.RepositoryInspector",
@@ -325,8 +361,19 @@ public struct RepositoryInspector {
         return files
     }
 
-    private func dirtyFiles(in repositoryURL: URL) throws -> (count: Int, modifiedAt: Date?) {
-        let files = try uncommittedFiles(in: repositoryURL)
+    /// At most three of a scan's status calls run at once. Each reads every file of a worktree, and more at a
+    /// time only fight over the disk: a full scan took a sixth longer and twice the system's CPU. A status
+    /// that waits over a second runs anyway, so one stuck on a network drive does not hold up the rest.
+    /// The files of a worktree the user opens are read at once, without a turn.
+    private static let statusTurns = DispatchSemaphore(value: 3)
+
+    private func dirtyFiles(in repositoryURL: URL, filtersOff: [(key: String, value: String)]) throws -> (count: Int, modifiedAt: Date?) {
+        let files: [CommitFileSnapshot]
+        do {
+            let turn = Self.statusTurns.wait(timeout: .now() + 1) == .success
+            defer { if turn { Self.statusTurns.signal() } }
+            files = try uncommittedFiles(in: repositoryURL, filtersOff: filtersOff)
+        }
         var modifiedAt: Date?
         for file in files {
             // A deleted file has no date of its own; deleting it updated its directory.
@@ -338,6 +385,24 @@ public struct RepositoryInspector {
             }
         }
         return (files.count, modifiedAt)
+    }
+
+    /// The main worktree on a branch with no linked worktrees is all `worktree list` would print, so it is
+    /// put together here, as git does: the real path of .git, less "/.git". Anything else asks git.
+    private func worktreeEntries(
+        in repositoryURL: URL, head: (name: String, commit: String)?, config: (filtersOff: [(key: String, value: String)], remotes: Set<String>, origin: String?, mayBeBare: Bool)
+    ) throws -> [(path: URL, head: String?, branch: String?, isBare: Bool)] {
+        let gitURL = repositoryURL.appendingPathComponent(".git")
+        var isDirectory: ObjCBool = false
+        if let head, !config.mayBeBare,
+           FileManager.default.fileExists(atPath: gitURL.path, isDirectory: &isDirectory), isDirectory.boolValue,
+           (try? FileManager.default.contentsOfDirectory(atPath: gitURL.appendingPathComponent("worktrees").path))?.isEmpty ?? true,
+           let real = realpath(gitURL.path, nil) {
+            defer { free(real) }
+            let path = String(cString: real)
+            return [(URL(fileURLWithPath: path.hasSuffix("/.git") ? String(path.dropLast("/.git".count)) : path, isDirectory: true), head.commit, head.name, false)]
+        }
+        return try worktreeEntries(in: repositoryURL)
     }
 
     private func worktreeEntries(in repositoryURL: URL) throws -> [(path: URL, head: String?, branch: String?, isBare: Bool)] {
@@ -368,161 +433,387 @@ public struct RepositoryInspector {
     private func worktrees(
         _ entries: [(path: URL, head: String?, branch: String?, isBare: Bool)],
         in repositoryURL: URL,
-        branches: [BranchSnapshot]
+        branches: [BranchSnapshot],
+        mainFilters: [(key: String, value: String)]
     ) throws -> [WorktreeSnapshot] {
-        var snapshots: [WorktreeSnapshot] = []
         // A bare repository is listed first but has no files; its linked worktrees are not main.
-        for (index, entry) in entries.enumerated() where !entry.isBare {
+        let present = entries.enumerated().filter { _, entry in
             var isDirectory: ObjCBool = false
-            guard FileManager.default.fileExists(atPath: entry.path.path, isDirectory: &isDirectory), isDirectory.boolValue else {
-                continue
+            return !entry.isBare && FileManager.default.fileExists(atPath: entry.path.path, isDirectory: &isDirectory) && isDirectory.boolValue
+        }
+        let branchDates = Dictionary(branches.map { ($0.name, $0.lastCommitDate) }) { first, _ in first }
+        // A worktree on a branch was last active at the branch's last commit; one call dates every other HEAD.
+        let undated = present.compactMap { _, entry -> String? in
+            guard let head = entry.head, head.contains(where: { $0 != "0" }), entry.branch.flatMap({ branchDates[$0] ?? nil }) == nil else { return nil }
+            return head
+        }
+        var headDates: [String: Date] = [:]
+        if !undated.isEmpty {
+            for line in try git.output(in: repositoryURL, ["show", "-s", "--format=%H%x1F%cI"] + undated).split(separator: "\n") {
+                let fields = line.split(separator: "\u{1F}")
+                if fields.count == 2 { headDates[String(fields[0])] = Self.date(from: String(fields[1])) }
             }
-            var date: Date?
-            if let head = entry.head, head.contains(where: { $0 != "0" }) {
-                let dateString = try git.output(in: entry.path, ["show", "-s", "--format=%cI", head])
-                date = Self.date(from: dateString.trimmingCharacters(in: .whitespacesAndNewlines))
-            }
+        }
+        return try present.map { index, entry in
             var detachedCommits = 0
             if entry.branch == nil, let head = entry.head, head.contains(where: { $0 != "0" }) {
                 detachedCommits = try Self.count(git.output(in: repositoryURL, [
                     "rev-list", "--count", head, "--not", "--remotes", "--branches", "--tags"
                 ]))
             }
-            let dirty = try dirtyFiles(in: entry.path)
-            snapshots.append(WorktreeSnapshot(
+            // The main worktree's config is the one already read; a linked worktree may have its own.
+            let dirty = try dirtyFiles(in: entry.path, filtersOff: index == 0 ? mainFilters : filtersOff(in: entry.path))
+            return WorktreeSnapshot(
                 path: entry.path,
                 name: entry.path.lastPathComponent,
                 branch: entry.branch,
                 isMain: index == 0,
                 dirtyFileCount: dirty.count,
                 dirtyModifiedAt: dirty.modifiedAt,
-                lastActivity: date,
+                lastActivity: entry.branch.flatMap { branchDates[$0] ?? nil } ?? entry.head.flatMap { headDates[$0] },
                 behind: branches.first { $0.name == entry.branch }?.behind ?? 0,
                 unpushedCommits: detachedCommits
-            ))
+            )
         }
-        return snapshots
     }
 
-    /// The branch work is merged into: the server's default branch as the clone recorded it, else its
-    /// main or master, else a local main or master. A fork's work lands in the repository it was forked
-    /// from, so the remote named upstream goes before origin.
-    private func base(in repositoryURL: URL) throws -> (ref: String, name: String)? {
-        var candidates: [String] = []
+    /// Local branches, the branch work is merged into, whether there is a stash, and the branch HEAD names,
+    /// from one for-each-ref. Each branch reads: name, commit, symref, HEAD mark, upstream, date, track,
+    /// upstream's full name.
+    private func refs(in repositoryURL: URL) throws -> (branches: [[String]], base: Base?, hasStash: Bool, head: (name: String, commit: String)?) {
+        // Of remote branches only those a base can be: a repository may hold thousands.
+        let remoteRefs = ["upstream", "origin"].flatMap { remote in ["HEAD", "main", "master"].map { "refs/remotes/\(remote)/\($0)" } }
+        let format = "%(refname)%1F%(objectname)%1F%(symref)%1F%(HEAD)%1F%(upstream:short)%1F%(committerdate:iso-strict)%1F%(upstream:track)%1F%(upstream)%1E"
+        let output = try git.output(in: repositoryURL, ["for-each-ref", "--sort=refname", "--format=\(format)", "refs/heads", "refs/stash"] + remoteRefs)
+        let records = try Self.records(output).map { record in
+            let fields = Self.fields(record)
+            guard fields.count >= 8 else { throw Self.parseError(record) }
+            return fields
+        }
+        let listed = Dictionary(records.map { ($0[0], $0) }) { first, _ in first }
+        // The server's default branch as the clone recorded it, else its main or master, else a local main
+        // or master. A fork's work lands in the repository it was forked from, so upstream goes before origin.
+        var bases: [(ref: String, commit: String)] = []
         for remote in ["upstream", "origin"] {
-            if let head = try git.optionalOutput(in: repositoryURL, ["symbolic-ref", "--quiet", "refs/remotes/\(remote)/HEAD"]) {
-                candidates.append(head.trimmingCharacters(in: .whitespacesAndNewlines))
-            }
-            candidates += ["refs/remotes/\(remote)/main", "refs/remotes/\(remote)/master"]
+            // for-each-ref leaves out a HEAD that points at no ref.
+            if let head = listed["refs/remotes/\(remote)/HEAD"], !head[2].isEmpty { bases.append((head[2], head[1])) }
+            bases += ["main", "master"].compactMap { listed["refs/remotes/\(remote)/\($0)"].map { ($0[0], $0[1]) } }
         }
-        candidates += ["refs/heads/main", "refs/heads/master"]
-        for ref in candidates where try git.optionalOutput(in: repositoryURL, ["rev-parse", "--verify", "--quiet", ref]) != nil {
+        bases += ["main", "master"].compactMap { listed["refs/heads/\($0)"].map { ($0[0], $0[1]) } }
+        let base = bases.first.map { base in
             // refs/heads/<name> or refs/remotes/<remote>/<name>; the name may have slashes of its own.
-            let parts = ref.split(separator: "/", maxSplits: ref.hasPrefix("refs/heads/") ? 2 : 3)
-            return (ref, String(parts[parts.count - 1]))
+            let parts = base.ref.split(separator: "/", maxSplits: base.ref.hasPrefix("refs/heads/") ? 2 : 3)
+            return Base(ref: base.ref, name: String(parts[parts.count - 1]), commit: base.commit)
         }
-        return nil
+        let branches = records.filter { $0[0].hasPrefix("refs/heads/") }
+        let head = branches.first { $0[3] == "*" }.map { (name: String($0[0].dropFirst("refs/heads/".count)), commit: $0[1]) }
+        return (branches, base, listed["refs/stash"] != nil, head)
     }
 
-    /// Whether a branch's changes are all in the base already, as after a squash merge: every file the
-    /// branch changed or deleted since it left the base reads the same in the base. Only reads, unlike a trial merge,
-    /// which writes objects. A branch that touched over a thousand files, or one git cannot compare,
-    /// as in a partial clone missing the trees, is left as not merged.
-    private func isSquashed(_ branch: String, since mergeBase: String, into base: String, in repositoryURL: URL) -> Bool {
-        // ":<old mode> <new mode> <old blob> <new blob> <status>" then the path: each file as the branch found
-        // it and as it left it.
-        guard let changed = try? git.run(in: repositoryURL, ["diff-tree", "-r", "--raw", "--no-abbrev", "--no-renames", "-z", mergeBase, branch]),
-              changed.status == 0 else { return false }
-        var held: [Substring: Substring] = [:]
-        var wanted: [Substring: Substring] = [:]
-        let output = String(decoding: changed.standardOutput, as: UTF8.self)
-        for change in Self.rawChanges(output[...]) {
-            held[change.path] = change.oldBlob
-            wanted[change.path] = change.newBlob
+    private struct Base {
+        let ref: String
+        let name: String
+        let commit: String
+    }
+
+    private func branches(
+        _ records: [[String]], in repositoryURL: URL, hasRemote: Bool, checkedOut: Set<String>, base: Base?
+    ) throws -> [BranchSnapshot] {
+        // A branch level with or behind its upstream on a remote has no commits only here.
+        let synced = records.map { $0[7].hasPrefix("refs/remotes/") && $0[6] != "[gone]" && !$0[6].contains("ahead") }
+        let unpushed = hasRemote && synced.contains(false) ? try unpushedCounts(in: repositoryURL) : nil
+        let unpushedCounts = try zip(records, synced).map { fields, synced in
+            synced ? 0 : try unpushed?(fields[1]) ?? Self.count(git.output(in: repositoryURL, ["rev-list", "--count", fields[0], "--not", "--remotes"]))
         }
-        // A deleted file is in held only, a new one in wanted only.
-        let paths = Set(held.keys).union(wanted.keys)
-        guard !paths.isEmpty else { return true }
-        guard paths.count <= 1000 else { return false }
-        let pathspec = ["--"] + paths.map { ":(literal)\($0)" }
-        if (try? git.run(in: repositoryURL, ["diff-tree", "--quiet", "-r", base, branch] + pathspec))?.status == 0 { return true }
-        // The base may have edited those files again since. Then, walking its own line of commits from where
-        // the branch left, one commit held every file as the branch left it.
-        guard let walk = try? git.run(in: repositoryURL, [
-            "log", "--first-parent", "--diff-merges=first-parent", "--reverse", "--raw", "--no-abbrev", "--no-renames", "-z",
-            "--format=%x01", base, "--not", mergeBase
-        ] + pathspec), walk.status == 0 else { return false }
-        for commit in String(decoding: walk.standardOutput, as: UTF8.self).split(separator: "\u{1}") {
-            for change in Self.rawChanges(commit) {
-                held[change.path] = change.newBlob
+        // The local branch of the base's name is the base itself. Not every branch tracking it is:
+        // one started from origin/main tracks origin/main too.
+        let isBase = records.map { fields in base.map { fields[0] == "refs/heads/\($0.name)" } ?? false }
+        // Work on no remote is counted as such; only work the server has is checked against the base.
+        let checked = records.indices.map { !isBase[$0] && unpushedCounts[$0] == 0 }
+        let candidates = checked.contains(true) ? base : nil
+        let ahead = try candidates.flatMap { try commitsAhead(of: $0.ref, in: repositoryURL) }
+        // An older git lists the branches the base lacks anything of, and those get their commits counted one by one.
+        let notMerged = try candidates.flatMap { base in
+            ahead != nil ? nil : Set(try git.output(in: repositoryURL, ["for-each-ref", "--no-merged=\(base.ref)", "--format=%(refname)", "refs/heads"])
+                .split(separator: "\n").map(String.init))
+        } ?? []
+        let counted = try records.indices.map { index in
+            let fields = records[index]
+            let ref = fields[0]
+            var unmerged = 0
+            if let base, checked[index] {
+                unmerged = try ahead.map { $0[ref] ?? 0 }
+                    ?? (notMerged.contains(ref) ? Self.count(git.output(in: repositoryURL, ["rev-list", "--count", ref, "--not", base.ref, "--"])) : 0)
             }
-            if held == wanted { return true }
+            return (fields: fields, name: String(ref.dropFirst("refs/heads/".count)), unpushed: unpushedCounts[index], isBase: isBase[index], unmerged: unmerged)
+        }
+        let merges = try base.map { base in
+            try self.merges(of: counted.filter { $0.unmerged > 0 }.map { (ref: $0.fields[0], commit: $0.fields[1]) }, into: base, in: repositoryURL)
+        } ?? [:]
+        return counted.map { branch in
+            let fields = branch.fields
+            return BranchSnapshot(
+                name: branch.name,
+                upstream: fields[4].isEmpty ? nil : fields[4],
+                ahead: Self.trackCount("ahead", in: fields[6]),
+                behind: Self.trackCount("behind", in: fields[6]),
+                lastCommitDate: Self.date(from: fields[5]),
+                hasWorktree: checkedOut.contains(branch.name),
+                unpushedCommits: branch.unpushed,
+                upstreamGone: fields[6] == "[gone]",
+                isBase: branch.isBase,
+                unmergedCommits: merges[fields[0]] == .squashed ? 0 : branch.unmerged,
+                isUnrelated: merges[fields[0]] == .unrelated
+            )
+        }
+    }
+
+    /// For each branch, the commits it holds that no remote branch does: one list of every such commit with
+    /// its parents, walked from each branch's commit, instead of a rev-list per branch.
+    private func unpushedCounts(in repositoryURL: URL) throws -> (String) -> Int {
+        let graph = Self.graph(try git.data(in: repositoryURL, ["rev-list", "--parents", "--branches", "--not", "--remotes"]))
+        return { Self.reachable(from: $0, in: graph).count }
+    }
+
+    /// The lines of rev-list --parents, "<commit> <parent>…", as each commit's parents.
+    private static func graph(_ output: Data) -> [String: [String]] {
+        output.withUnsafeBytes { (bytes: UnsafeRawBufferPointer) -> [String: [String]] in
+            var graph: [String: [String]] = [:]
+            // Split by byte: by Character, the lines of a long history take tens of milliseconds.
+            for line in bytes.split(separator: UInt8(ascii: "\n")) {
+                let commits = line.split(separator: UInt8(ascii: " ")).map { String(decoding: $0, as: UTF8.self) }
+                graph[commits[0]] = Array(commits.dropFirst())
+            }
+            return graph
+        }
+    }
+
+    /// The commits of `graph` that `tip` reaches, itself included; the walk stops at commits outside it.
+    private static func reachable(from tip: String, in graph: [String: [String]]) -> Set<String> {
+        var seen: Set<String> = []
+        var pending = [tip]
+        while let commit = pending.popLast() {
+            guard let parents = graph[commit], seen.insert(commit).inserted else { continue }
+            pending += parents
+        }
+        return seen
+    }
+
+    /// The commits each branch has that `base` lacks, which git 2.41 counts for all branches in one pass;
+    /// nil from an older git, which fails the format.
+    private func commitsAhead(of base: String, in repositoryURL: URL) throws -> [String: Int]? {
+        let result = try git.run(in: repositoryURL, ["for-each-ref", "--format=%(refname)%1F%(ahead-behind:\(base))", "refs/heads"])
+        guard result.status == 0 else { return nil }
+        var counts: [String: Int] = [:]
+        for line in String(decoding: result.standardOutput, as: UTF8.self).split(separator: "\n") {
+            // "<ahead> <behind>", empty for a ref that names no commit, as one written by hand may.
+            let fields = line.split(separator: "\u{1F}", omittingEmptySubsequences: false)
+            guard fields.count == 2 else { throw Self.parseError(String(line)) }
+            if fields[1].isEmpty { continue }
+            guard let count = Int(fields[1].prefix { $0 != " " }) else { throw Self.parseError(String(line)) }
+            counts[String(fields[0])] = count
+        }
+        return counts
+    }
+
+    private enum Merge { case open, squashed, unrelated }
+
+    /// Merge checks already made, by repository, branch commit and base commit. What one commit holds of
+    /// another never changes, so an answer stands until either branch moves.
+    private final class KnownMerges: @unchecked Sendable {
+        private let lock = NSLock()
+        private var merges: [String: Merge] = [:]
+
+        subscript(key: String) -> Merge? {
+            get {
+                lock.lock()
+                defer { lock.unlock() }
+                return merges[key]
+            }
+            set {
+                lock.lock()
+                defer { lock.unlock() }
+                // Answers for commits long gone would pile up over weeks; starting over costs one scan's checks.
+                if merges.count > 10_000 { merges.removeAll() }
+                merges[key] = newValue
+            }
+        }
+    }
+
+    private static let knownMerges = KnownMerges()
+
+    /// For branches with commits the base lacks: whether each is in the base after all, as after a squash
+    /// merge, or has no history in common with it. Merged means every file the branch changed or deleted
+    /// since it left the base read, after some commit of the base's own line since, as the branch left it.
+    /// Only reads, unlike a trial merge, which writes objects. A branch that touched over a thousand files,
+    /// or one git cannot compare, as in a partial clone missing the trees, is left as not merged.
+    private func merges(of candidates: [(ref: String, commit: String)], into base: Base, in repositoryURL: URL) throws -> [String: Merge] {
+        var merges: [String: Merge] = [:]
+        var pending: [(ref: String, key: String, commit: String, mergeBase: String, held: [String: String], wanted: [String: String], paths: Set<String>)] = []
+        func settle(_ ref: String, _ key: String, _ merge: Merge) {
+            merges[ref] = merge
+            Self.knownMerges[key] = merge
+        }
+        for (ref, commit) in candidates {
+            let key = "\(repositoryURL.path)\0\(commit)\0\(base.commit)"
+            if let known = Self.knownMerges[key] {
+                merges[ref] = known
+                continue
+            }
+            guard let output = try git.optionalOutput(in: repositoryURL, ["merge-base", base.commit, commit]) else {
+                // Not kept: a shallow clone, once deepened, may find the history in common with no commit moved.
+                merges[ref] = .unrelated
+                continue
+            }
+            let mergeBase = output.trimmingCharacters(in: .whitespacesAndNewlines)
+            // Each file as the branch found it and as it left it: a deleted file is in held only, a new one in wanted only.
+            let changed = try git.run(in: repositoryURL, ["diff-tree", "-r", "--raw", "--no-abbrev", "--no-renames", "-z", mergeBase, commit])
+            guard changed.status == 0 else { continue }
+            let changes = Self.rawCommits(changed.standardOutput)[0].changes
+            var held: [String: String] = [:]
+            var wanted: [String: String] = [:]
+            for change in changes {
+                held[change.path] = change.before
+                wanted[change.path] = change.after
+            }
+            let paths = Set(changes.map(\.path))
+            if paths.isEmpty {
+                settle(ref, key, .squashed)
+            } else if mergeBase == base.commit || paths.count > 1000 {
+                // Nothing reached the base since the branch left it, or the branch is too big to compare.
+                settle(ref, key, .open)
+            } else {
+                pending.append((ref, key, commit, mergeBase, held, wanted, paths))
+            }
+        }
+        guard !pending.isEmpty else { return merges }
+
+        // One walk of the base's own line serves every branch, from the oldest point any of them left it.
+        // git log lists every change faster than it matches a thousand paths.
+        let mergeBases = Array(Set(pending.map(\.mergeBase)))
+        let oldest = mergeBases.count == 1
+            ? mergeBases[0]
+            : try git.optionalOutput(in: repositoryURL, ["merge-base", "--octopus"] + mergeBases)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Every commit since, side branches too: a branch that left a side branch merged in later holds part of the line.
+        let graph = try oldest.map { Self.graph(try git.data(in: repositoryURL, ["rev-list", "--parents", "-n", "100000", base.commit, "--not", $0])) }
+        var length = 0
+        var next = graph.map { _ in base.commit }
+        while let commit = next, let parents = graph?[commit] {
+            length += 1
+            next = parents.first
+        }
+        var line: [(commit: String, parent: String?, changes: [Change])]?
+        // A line too long to list whole is read per branch, for its files only.
+        if let oldest, let graph, graph.count < 100_000, length <= 5000 {
+            let walk = try git.run(in: repositoryURL, [
+                "log", "--first-parent", "--diff-merges=first-parent", "--reverse", "--raw", "--no-abbrev", "--no-renames", "-z",
+                "--format=%x01%H %P", base.commit, "--not", oldest
+            ])
+            if walk.status == 0 {
+                // Only the files some branch changed are kept.
+                let kept = pending.reduce(into: Set<String>()) { $0.formUnion($1.paths) }
+                line = Self.rawCommits(walk.standardOutput, keeping: kept).dropFirst().compactMap { commit in
+                    commit.header.first.map { ($0, commit.header.dropFirst().first, commit.changes) }
+                }
+            }
+        }
+        for branch in pending {
+            let merged: Bool?
+            if let line, let graph {
+                // The part of the line the branch's start holds comes first; the base's work since is the rest.
+                let left = Self.reachable(from: branch.mergeBase, in: graph)
+                let start = line.prefix { left.contains($0.commit) }.count
+                // The walk ends at the base's tip only for a branch that left from the line itself; another is
+                // checked at the tip as well.
+                let fromLine = (start == 0 ? line.first?.parent : line[start - 1].commit) == branch.mergeBase
+                let reached = Self.reaches(branch.wanted, from: branch.held, through: line[start...].map(\.changes), paths: branch.paths)
+                merged = reached || fromLine ? reached : try holdsAtTip(branch.commit, paths: branch.paths, base: base.commit, in: repositoryURL)
+            } else {
+                merged = try isSquashed(branch.commit, held: branch.held, wanted: branch.wanted, paths: branch.paths, since: branch.mergeBase, into: base.commit, in: repositoryURL)
+            }
+            if let merged { settle(branch.ref, branch.key, merged ? .squashed : .open) }
+        }
+        return merges
+    }
+
+    /// Whether the base's tip reads every one of `paths` as `branch` does; nil when git cannot compare.
+    /// A failed or cancelled call throws, so no answer is kept from it.
+    private func holdsAtTip(_ branch: String, paths: Set<String>, base: String, in repositoryURL: URL) throws -> Bool? {
+        let result = try git.run(in: repositoryURL, ["diff-tree", "--quiet", "-r", base, branch, "--"] + paths.map { ":(literal)\($0)" })
+        return result.status == 0 ? true : result.status == 1 ? false : nil
+    }
+
+    /// The check for one branch alone: the base's tip, then the base's line since the branch left it, read
+    /// for the branch's files only. nil when git cannot compare.
+    private func isSquashed(
+        _ branch: String, held: [String: String], wanted: [String: String], paths: Set<String>,
+        since mergeBase: String, into base: String, in repositoryURL: URL
+    ) throws -> Bool? {
+        guard let atTip = try holdsAtTip(branch, paths: paths, base: base, in: repositoryURL) else { return nil }
+        if atTip { return true }
+        // The base may have edited those files again since.
+        let walk = try git.run(in: repositoryURL, [
+            "log", "--first-parent", "--diff-merges=first-parent", "--reverse", "--raw", "--no-abbrev", "--no-renames", "-z",
+            "--format=%x01", base, "--not", mergeBase, "--"
+        ] + paths.map { ":(literal)\($0)" })
+        guard walk.status == 0 else { return nil }
+        let line = Self.rawCommits(walk.standardOutput).dropFirst().map(\.changes)
+        return Self.reaches(wanted, from: held, through: line, paths: paths)
+    }
+
+    /// Whether files that start as `held` read as `wanted` after one of `commits`, applied in order.
+    private static func reaches(
+        _ wanted: [String: String], from held: [String: String], through commits: [[Change]], paths: Set<String>
+    ) -> Bool {
+        var held = held
+        var differing = paths.filter { held[$0] != wanted[$0] }
+        for changes in commits {
+            for change in changes where paths.contains(change.path) {
+                held[change.path] = change.after
+                if held[change.path] == wanted[change.path] {
+                    differing.remove(change.path)
+                } else {
+                    differing.insert(change.path)
+                }
+            }
+            if differing.isEmpty { return true }
         }
         return false
     }
 
-    /// Changes in `--raw -z` output: ":<old mode> <new mode> <old blob> <new blob> <status>", then the path.
-    /// A blob of zeros, as on the missing side of an added or deleted file, reads as nil.
-    private static func rawChanges(_ output: Substring) -> [(oldBlob: Substring?, newBlob: Substring?, path: Substring)] {
-        let tokens = output.split(separator: "\0", omittingEmptySubsequences: false)
-        var changes: [(oldBlob: Substring?, newBlob: Substring?, path: Substring)] = []
-        var index = tokens.startIndex
-        while index < tokens.endIndex {
-            let fields = tokens[index].drop { $0 == "\n" }.split(separator: " ")
-            index += 1
-            guard fields.count == 5, fields[0].hasPrefix(":"), index < tokens.endIndex else { continue }
-            let blob = { (field: Substring) in field.allSatisfy { $0 == "0" } ? nil : field }
-            changes.append((blob(fields[2]), blob(fields[3]), tokens[index]))
-            index += 1
-        }
-        return changes
-    }
+    /// A file before and after a change, as its mode and blob: making a script executable changes it too.
+    private typealias Change = (before: String?, after: String?, path: String)
 
-    private func branches(in repositoryURL: URL, checkedOut: Set<String>, base: (ref: String, name: String)?) throws -> [BranchSnapshot] {
-        let format = "%(refname:lstrip=2)%1F%(upstream:short)%1F%(committerdate:iso-strict)%1F%(upstream:track)%1F%(refname)%1E"
-        let output = try git.output(in: repositoryURL, [
-            "for-each-ref", "--sort=refname", "--format=\(format)", "refs/heads"
-        ])
-        // One call tells which branches the base lacks anything of; only those need their commits counted.
-        let notMerged = try base.map {
-            Set(try git.output(in: repositoryURL, ["for-each-ref", "--no-merged=\($0.ref)", "--format=%(refname)", "refs/heads"])
-                .split(separator: "\n").map(String.init))
-        } ?? []
-        return try Self.records(output).map { record in
-            let fields = Self.fields(record)
-            guard fields.count >= 5 else { throw Self.parseError(record) }
-            let unpushed = try git.output(in: repositoryURL, ["rev-list", "--count", fields[4], "--not", "--remotes"])
-            // The local branch of the base's name is the base itself. Not every branch tracking it is:
-            // one started from origin/main tracks origin/main too.
-            let isBase = base.map { fields[0] == $0.name } ?? false
-            var unmerged = 0
-            var unrelated = false
-            // Work on no remote is counted as such; only work the server has is checked against the base.
-            let unpushedCount = try Self.count(unpushed)
-            if let base, !isBase, unpushedCount == 0, notMerged.contains(fields[4]) {
-                unmerged = try Self.count(git.output(in: repositoryURL, ["rev-list", "--count", fields[4], "--not", base.ref, "--"]))
-                if unmerged > 0 {
-                    if let mergeBase = try git.optionalOutput(in: repositoryURL, ["merge-base", base.ref, fields[4]]) {
-                        let since = mergeBase.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if isSquashed(fields[4], since: since, into: base.ref, in: repositoryURL) { unmerged = 0 }
-                    } else {
-                        unrelated = true
+    /// `--raw -z` output in commits, where the format starts each with \u{1}, then its hash and parents;
+    /// changes before any such start come first, under no header. A change is ":<old mode> <new mode>
+    /// <old blob> <new blob> <status>", then the path. A blob of zeros, as on the missing side of an added
+    /// or deleted file, reads as nil. With `kept`, changes to other paths are left out.
+    private static func rawCommits(_ output: Data, keeping kept: Set<String>? = nil) -> [(header: [String], changes: [Change])] {
+        output.withUnsafeBytes { (bytes: UnsafeRawBufferPointer) -> [(header: [String], changes: [Change])] in
+            var commits: [(header: [String], changes: [Change])] = [([], [])]
+            func text(_ field: Slice<UnsafeRawBufferPointer>) -> String { String(decoding: field, as: UTF8.self) }
+            var change: Slice<UnsafeRawBufferPointer>?
+            // Split by byte: by Character, the megabytes a long walk prints take a tenth of a second.
+            for token in bytes.split(separator: 0, omittingEmptySubsequences: false) {
+                if let fields = change.map({ $0.split(separator: UInt8(ascii: " ")) }) {
+                    change = nil
+                    let path = text(token)
+                    guard fields.count == 5, kept?.contains(path) ?? true else { continue }
+                    let file = { (mode: Slice<UnsafeRawBufferPointer>, blob: Slice<UnsafeRawBufferPointer>) in
+                        blob.allSatisfy { $0 == UInt8(ascii: "0") } ? nil : text(mode) + " " + text(blob)
                     }
+                    commits[commits.count - 1].changes.append((file(fields[0].dropFirst(), fields[2]), file(fields[1], fields[3]), path))
+                    continue
+                }
+                let token = token.drop { $0 == UInt8(ascii: "\n") }
+                if token.first == 1 {
+                    commits.append((token.dropFirst().split(separator: UInt8(ascii: " ")).map(text), []))
+                } else if token.first == UInt8(ascii: ":") {
+                    // Its path is the next field, whatever it holds.
+                    change = token
                 }
             }
-            return BranchSnapshot(
-                name: fields[0],
-                upstream: fields[1].isEmpty ? nil : fields[1],
-                ahead: Self.trackCount("ahead", in: fields[3]),
-                behind: Self.trackCount("behind", in: fields[3]),
-                lastCommitDate: Self.date(from: fields[2]),
-                hasWorktree: checkedOut.contains(fields[0]),
-                unpushedCommits: unpushedCount,
-                upstreamGone: fields[3] == "[gone]",
-                isBase: isBase,
-                unmergedCommits: unmerged,
-                isUnrelated: unrelated
-            )
+            return commits
         }
     }
 
