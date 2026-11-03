@@ -72,12 +72,13 @@ public struct RepositoryInspector {
         guard file.status != "?", hasHead else {
             let arguments = ["diff"] + Self.diffOptions + ["--no-index", "--", "/dev/null", file.path]
             let result = try git.run(in: worktreeURL, arguments, config: filtersOff(in: worktreeURL))
-            // --no-index exits with 1 when the files differ, which they always do here.
-            if result.status == 1 { return Self.fileDiff(String(decoding: result.standardOutput, as: UTF8.self)) }
+            // --no-index exits with 1 when the files differ, which they always do here;
+            // with nothing printed it failed, as on a nested repository.
+            if result.status == 1, !result.standardOutput.isEmpty { return Self.fileDiff(String(decoding: result.standardOutput, as: UTF8.self)) }
             return Self.fileDiff(try git.output(from: result, in: worktreeURL, arguments))
         }
         // Plumbing: porcelain git diff rewrites the index to note a touched file, --no-optional-locks or not.
-        return Self.fileDiff(try git.output(in: worktreeURL, ["diff-index", "-p"] + Self.diffOptions + ["HEAD", "--", file.path], config: filtersOff(in: worktreeURL)))
+        return Self.fileDiff(try git.output(in: worktreeURL, ["diff-index", "-p"] + Self.diffOptions + ["HEAD", "--", Self.literal(file.path)], config: filtersOff(in: worktreeURL)))
     }
 
     /// How one file in a stash differs from the commit it was stashed on.
@@ -91,12 +92,18 @@ public struct RepositoryInspector {
     private func shownDiff(of path: String, in revision: String, repositoryURL: URL) throws -> FileDiff {
         Self.fileDiff(try git.output(in: repositoryURL, [
             "diff-tree", "-p", "--root", "--no-commit-id", "--diff-merges=first-parent", "--no-renames"
-        ] + Self.diffOptions + [revision, "--", path]))
+        ] + Self.diffOptions + [revision, "--", Self.literal(path)]))
+    }
+
+    /// A path as a name, never a glob: "a*.txt" means only that file.
+    private static func literal(_ path: String) -> String {
+        ":(literal)\(path)"
     }
 
     /// Reads a unified diff of one file into numbered lines. Headers before the first hunk are skipped.
     static func fileDiff(_ output: String) -> FileDiff {
-        var rawLines = output.split(separator: "\n", omittingEmptySubsequences: false)
+        // Split on "\n" itself: Swift reads "\r\n" as one Character, which a Character split never breaks.
+        var rawLines = output.components(separatedBy: "\n")
         if rawLines.last == "" { rawLines.removeLast() }
         var lines: [DiffLine] = []
         var isBinary = false
@@ -118,8 +125,12 @@ public struct RepositoryInspector {
                 if raw.hasPrefix("Binary files ") { isBinary = true }
                 continue
             }
-            let text = String(raw.dropFirst())
-            switch raw.first {
+            // The marker is the first scalar; a combining mark after it would fold both into one Character.
+            var scalars = raw.unicodeScalars.dropFirst()
+            // A Windows line ending is not part of the line.
+            if scalars.last == "\r" { scalars.removeLast() }
+            let text = String(String.UnicodeScalarView(scalars))
+            switch raw.unicodeScalars.first {
             case "+":
                 lines.append(DiffLine(kind: .added, oldLine: nil, newLine: new, text: text))
                 new += 1

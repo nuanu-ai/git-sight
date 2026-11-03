@@ -100,6 +100,9 @@ enum FileDiffIntegrationTests {
         try runGit(in: repositoryURL, ["commit", "-am", "Edit both"])
         let edit = try inspector.history(of: ["HEAD"], in: repositoryURL)[0]
         try expectEqual(try inspector.diff(of: "a*.txt", in: edit, repositoryURL: repositoryURL).lines.filter { $0.kind == .added }.map(\.text), ["star, edited"], "a file named like a glob shows only itself")
+        try write("star, again\n", "a*.txt")
+        try write("abc, again\n", "abc.txt")
+        try expectEqual(try inspector.uncommittedDiff(of: CommitFileSnapshot(status: "M", path: "a*.txt"), in: repositoryURL).lines.filter { $0.kind == .added }.map(\.text), ["star, again"], "an uncommitted file named like a glob shows only itself")
 
         try write("one\r\n2\r\n", "windows.txt")
         try expectEqual(try inspector.uncommittedDiff(of: CommitFileSnapshot(status: "M", path: "windows.txt"), in: repositoryURL).lines.map(\.text), ["@@ -1,2 +1,2 @@", "one", "two", "2"], "Windows line endings split into lines like any others")
