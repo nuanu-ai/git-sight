@@ -46,6 +46,7 @@ Every rule here comes from a mistake that already shipped once.
 - **Numbers line up on the right.** Use monospaced digits and a shared trailing edge, so ages and counts read as a column.
 - **Nothing moves under the pointer.** A control keeps its size when its state changes. Confirmation swaps an icon; it does not change the label.
 - **Say each thing once.** A row does not show the same time or count twice, and a header does not repeat what the badge next to it says.
+- **Type comes from one scale.** Every size is a `TextRole` (primary, secondary, label, title) off one base the user sets with ⌘+ and ⌘−. Nothing is under 12 pt at the standard size, and rows that hold text grow with it. No `.caption`, `.footnote` or fixed point sizes in views.
 - **Spacing comes in steps** of 2, 4, 8, 12 and 16 pt. A group gets more space above it than between its rows.
 - **Match the reference, then stop.** When a view copies a known tool, such as the VS Code commit graph, take its density and its content, and add only what git-sight needs that the tool lacks.
 - **Look before calling it done.** Render every changed view in light and dark, at the default and the narrowest width (`Scripts/render_window.sh`). The sidebar and toolbar do not draw offscreen, so check them in the running app.
