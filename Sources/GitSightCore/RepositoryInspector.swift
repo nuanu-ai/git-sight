@@ -56,8 +56,8 @@ public struct RepositoryInspector {
 
     /// A diff longer than this is cut; nobody reads past it in a side pane.
     public static let diffLineLimit = 5000
-    /// Diffs show the file as stored: no external diff tools or text converters from the repository's config,
-    /// and no look inside a submodule's worktree, where its own config would apply.
+    /// Diffs show the file as stored: no external diff tools or text converters from the repository's config.
+    /// They run on plumbing, which ignores diff.submodule and so never diffs inside a submodule under its config.
     private static let diffOptions = ["--no-color", "--no-ext-diff", "--no-textconv", "--ignore-submodules=dirty"]
 
     /// How one file changed in a commit, against its first parent, as its file list counts it.
@@ -76,7 +76,8 @@ public struct RepositoryInspector {
             if result.status == 1 { return Self.fileDiff(String(decoding: result.standardOutput, as: UTF8.self)) }
             return Self.fileDiff(try git.output(from: result, in: worktreeURL, arguments))
         }
-        return Self.fileDiff(try git.output(in: worktreeURL, ["diff"] + Self.diffOptions + ["HEAD", "--", file.path], config: filtersOff(in: worktreeURL)))
+        // Plumbing: porcelain git diff rewrites the index to note a touched file, --no-optional-locks or not.
+        return Self.fileDiff(try git.output(in: worktreeURL, ["diff-index", "-p"] + Self.diffOptions + ["HEAD", "--", file.path], config: filtersOff(in: worktreeURL)))
     }
 
     /// How one file in a stash differs from the commit it was stashed on.
@@ -86,10 +87,10 @@ public struct RepositoryInspector {
         return try shownDiff(of: file.path, in: untracked ? "\(stash)^3" : stash, repositoryURL: repositoryURL)
     }
 
-    /// `git show` of one path: a root commit shows as all new, a merge against its first parent.
+    /// One path of a commit, as diff-tree lists its files: a root commit all new, a merge against its first parent.
     private func shownDiff(of path: String, in revision: String, repositoryURL: URL) throws -> FileDiff {
         Self.fileDiff(try git.output(in: repositoryURL, [
-            "show", "--format=", "--diff-merges=first-parent", "--no-renames"
+            "diff-tree", "-p", "--root", "--no-commit-id", "--diff-merges=first-parent", "--no-renames"
         ] + Self.diffOptions + [revision, "--", path]))
     }
 
@@ -145,14 +146,19 @@ public struct RepositoryInspector {
         ])
     }
 
-    /// Config that turns off every filter the repository defines. git runs a filter's clean command
-    /// when it compares a changed file with the index, so status and diff would otherwise run it.
+    /// Config that turns off every filter the repository's own config defines. git runs a filter's clean
+    /// command when it compares a changed file with the index, so status and diff would otherwise run it.
+    /// Filters from the user's global and system config, such as Git LFS, are the user's and stay on.
     private func filtersOff(in worktreeURL: URL) throws -> [(key: String, value: String)] {
         let keys = try git.optionalOutput(in: worktreeURL, [
-            "config", "--name-only", "--get-regexp", #"^filter\..+\.(clean|smudge|process|required)$"#
+            "config", "--show-scope", "--name-only", "--get-regexp", #"^filter\..*\.(clean|smudge|process|required)$"#
         ]) ?? ""
-        // "filter.<driver>.clean", where the driver's name may itself contain dots.
-        let drivers = Set(keys.split(separator: "\n").map { $0.split(separator: ".", omittingEmptySubsequences: false).dropFirst().dropLast().joined(separator: ".") })
+        // "local\tfilter.<driver>.clean", where the driver's name may be empty or contain dots.
+        let drivers = Set(keys.split(separator: "\n").compactMap { line -> String? in
+            let fields = line.split(separator: "\t", maxSplits: 1)
+            guard fields.count == 2, fields[0] != "global", fields[0] != "system" else { return nil }
+            return fields[1].split(separator: ".", omittingEmptySubsequences: false).dropFirst().dropLast().joined(separator: ".")
+        })
         return drivers.sorted().flatMap { driver in
             ["clean", "smudge", "process"].map { (key: "filter.\(driver).\($0)", value: "") }
                 + [(key: "filter.\(driver).required", value: "false")]
