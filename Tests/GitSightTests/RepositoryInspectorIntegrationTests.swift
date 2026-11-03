@@ -94,7 +94,7 @@ enum RepositoryInspectorIntegrationTests {
         )
         for (name, test) in [
             ("each piece of work has its own verdict", RepositoryScoringIntegrationTests.testEachPieceOfWorkHasItsOwnVerdict),
-            ("pushed and merged branches are not risk", RepositoryScoringIntegrationTests.testPushedAndMergedBranchesAreNotRisk),
+            ("old branches on the server are stale, not lost", RepositoryScoringIntegrationTests.testOldBranchesOnTheServerAreStaleNotLost),
             ("unpushed work ages from in progress to critical", RepositoryScoringIntegrationTests.testUnpushedWorkAgesFromInProgressToCritical),
             ("old uncommitted work is risk while origin is still", RepositoryScoringIntegrationTests.testOldUncommittedWorkIsRiskWhileOriginIsStill),
             ("worktrees matter only for work they hold", RepositoryScoringIntegrationTests.testWorktreesMatterOnlyForWorkTheyHold),

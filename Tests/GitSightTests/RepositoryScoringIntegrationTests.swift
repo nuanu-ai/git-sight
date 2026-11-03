@@ -14,7 +14,7 @@ enum RepositoryScoringIntegrationTests {
         try expectEqual(Severity(of: .commits(upstreamGone: true), lastChanged: daysAgo(40), now: now), .warning, "a deleted branch left for over two weeks is no longer in progress, but never forgotten work")
     }
 
-    static func testPushedAndMergedBranchesAreNotRisk() throws {
+    static func testOldBranchesOnTheServerAreStaleNotLost() throws {
         let fixture = try makeRepository()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
         let old = gitDate(daysAgo: 40)
@@ -27,7 +27,8 @@ enum RepositoryScoringIntegrationTests {
 
         let snapshot = try RepositoryInspector().inspect(repositoryAt: fixture.repository)
         try expectEqual(snapshot.branches.map(\.name), ["main", "merged", "pushed"], "fixture keeps every local branch")
-        try expectEqual(snapshot.severity, .clean, "old branches whose commits are on the server hold no unsaved work")
+        // Nothing here is lost, so it is never forgotten; but a branch main never got is unfinished and stale.
+        try expectEqual(snapshot.severity, .warning, "a 40-day-old branch the server has and main does not is abandoned, not forgotten")
     }
 
     static func testUnpushedWorkAgesFromInProgressToCritical() throws {
@@ -95,10 +96,13 @@ enum RepositoryScoringIntegrationTests {
         try commit("pushed.txt", on: "pushed", in: fixture.repository, environment: old)
         try runGit(in: fixture.repository, ["push", "-u", "origin", "pushed"])
         try runGit(in: fixture.repository, ["checkout", "main"])
+        // Merged, so the branch is done and only the worktree is left to judge.
+        try runGit(in: fixture.repository, ["merge", "--ff-only", "pushed"])
+        try runGit(in: fixture.repository, ["push", "origin", "main"])
         let cleanURL = fixture.root.appendingPathComponent("clean-worktree")
         try runGit(in: fixture.repository, ["worktree", "add", cleanURL.path, "pushed"])
         let inspector = RepositoryInspector()
-        try expectEqual(try inspector.inspect(repositoryAt: fixture.repository).severity, .clean, "an old worktree of a pushed branch holds nothing unsaved")
+        try expectEqual(try inspector.inspect(repositoryAt: fixture.repository).severity, .clean, "a worktree of a merged branch holds nothing unsaved")
 
         try runGit(in: fixture.repository, ["checkout", "--detach", "main"])
         try commit("tagged.txt", on: nil, in: fixture.repository, environment: old)

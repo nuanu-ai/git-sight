@@ -13,7 +13,8 @@ public struct RepositoryInspector {
             .trimmingCharacters(in: .whitespacesAndNewlines) == "true"
         let dirtyFileCount = isBare ? 0 : try dirtyFiles(in: repositoryURL).count
         let worktreeEntries = try worktreeEntries(in: repositoryURL)
-        let branches = try branches(in: repositoryURL, checkedOut: Set(worktreeEntries.compactMap(\.branch)))
+        let base = try base(in: repositoryURL)
+        let branches = try branches(in: repositoryURL, checkedOut: Set(worktreeEntries.compactMap(\.branch)), base: base)
         let worktrees = try worktrees(worktreeEntries, in: repositoryURL, branches: branches)
         let currentBranchSnapshot = branches.first { $0.name == currentBranch }
         let divergence = (ahead: currentBranchSnapshot?.ahead ?? 0, behind: currentBranchSnapshot?.behind ?? 0)
@@ -24,6 +25,7 @@ public struct RepositoryInspector {
         let lastActivity = worktrees.compactMap(\.lastActivity).max()
         let assessment = RepositoryScore.evaluate(
             hasRemote: hasRemote,
+            hasBase: base != nil,
             worktrees: worktrees,
             branches: branches,
             stashes: stashes
@@ -42,6 +44,7 @@ public struct RepositoryInspector {
             remoteWebURL: remote.flatMap(webURL(from:)),
             lastActivity: lastActivity,
             hasRemote: hasRemote,
+            baseBranch: base?.name,
             oldestUnsavedWork: assessment.oldestUnsavedWork,
             severity: assessment.severity
         )
@@ -401,7 +404,35 @@ public struct RepositoryInspector {
         return snapshots
     }
 
-    private func branches(in repositoryURL: URL, checkedOut: Set<String>) throws -> [BranchSnapshot] {
+    /// The branch work is merged into: the server's default branch as the clone recorded it,
+    /// else origin's main or master, else a local main or master.
+    private func base(in repositoryURL: URL) throws -> (ref: String, name: String)? {
+        var candidates = ["refs/remotes/origin/main", "refs/remotes/origin/master", "refs/heads/main", "refs/heads/master"]
+        if let head = try git.optionalOutput(in: repositoryURL, ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"]) {
+            candidates.insert(head.trimmingCharacters(in: .whitespacesAndNewlines), at: 0)
+        }
+        for ref in candidates where try git.optionalOutput(in: repositoryURL, ["rev-parse", "--verify", "--quiet", ref]) != nil {
+            let prefix = ref.hasPrefix("refs/heads/") ? "refs/heads/" : "refs/remotes/origin/"
+            return (ref, String(ref.dropFirst(prefix.count)))
+        }
+        return nil
+    }
+
+    /// Whether a branch's changes are all in the base already, as after a squash merge: every file the
+    /// branch changed since it left the base reads the same in the base. Only reads, unlike a trial merge,
+    /// which writes objects. A branch that touched over a thousand files is left as not merged.
+    private func isSquashed(_ branch: String, into base: String, in repositoryURL: URL) throws -> Bool {
+        guard let mergeBase = try git.optionalOutput(in: repositoryURL, ["merge-base", base, branch])?
+            .trimmingCharacters(in: .whitespacesAndNewlines) else { return false }
+        let files = try git.output(in: repositoryURL, ["diff-tree", "-r", "--name-only", "--no-renames", "-z", mergeBase, branch])
+            .split(separator: "\0")
+        guard !files.isEmpty else { return true }
+        guard files.count <= 1000 else { return false }
+        let result = try git.run(in: repositoryURL, ["diff-tree", "--quiet", "-r", base, branch, "--"] + files.map { ":(literal)\($0)" })
+        return result.status == 0
+    }
+
+    private func branches(in repositoryURL: URL, checkedOut: Set<String>, base: (ref: String, name: String)?) throws -> [BranchSnapshot] {
         let format = "%(refname:lstrip=2)%1F%(upstream:short)%1F%(committerdate:iso-strict)%1F%(upstream:track)%1F%(refname)%1E"
         let output = try git.output(in: repositoryURL, [
             "for-each-ref", "--sort=refname", "--format=\(format)", "refs/heads"
@@ -410,6 +441,13 @@ public struct RepositoryInspector {
             let fields = Self.fields(record)
             guard fields.count >= 5 else { throw Self.parseError(record) }
             let unpushed = try git.output(in: repositoryURL, ["rev-list", "--count", fields[4], "--not", "--remotes"])
+            // The local main is the base itself, whether it tracks origin's main or there is no server.
+            let isBase = base.map { fields[4] == $0.ref || fields[1] == "origin/\($0.name)" } ?? false
+            var unmerged = 0
+            if let base, !isBase {
+                unmerged = try Self.count(git.output(in: repositoryURL, ["rev-list", "--count", fields[4], "--not", base.ref, "--"]))
+                if unmerged > 0, try isSquashed(fields[4], into: base.ref, in: repositoryURL) { unmerged = 0 }
+            }
             return BranchSnapshot(
                 name: fields[0],
                 upstream: fields[1].isEmpty ? nil : fields[1],
@@ -418,7 +456,9 @@ public struct RepositoryInspector {
                 lastCommitDate: Self.date(from: fields[2]),
                 hasWorktree: checkedOut.contains(fields[0]),
                 unpushedCommits: try Self.count(unpushed),
-                upstreamGone: fields[3] == "[gone]"
+                upstreamGone: fields[3] == "[gone]",
+                isBase: isBase,
+                unmergedCommits: unmerged
             )
         }
     }

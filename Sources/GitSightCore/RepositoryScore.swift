@@ -6,10 +6,14 @@ enum RepositoryScore {
     static let criticalAge: TimeInterval = 30 * 24 * 60 * 60
     /// A branch deleted on the server is most likely merged: a notice for two weeks, then leftover.
     static let goneUpstreamAge: TimeInterval = 14 * 24 * 60 * 60
+    /// Unfinished work on the server is in progress this long, as is a merged leftover before it counts as clutter.
+    static let unfinishedAge: TimeInterval = 14 * 24 * 60 * 60
+    static let unfinishedCriticalAge: TimeInterval = 60 * 24 * 60 * 60
 
     /// Rates work that exists only on this machine by how long it has been left alone.
     static func evaluate(
         hasRemote: Bool,
+        hasBase: Bool = false,
         worktrees: [WorktreeSnapshot],
         branches: [BranchSnapshot],
         stashes: [StashSnapshot],
@@ -33,6 +37,13 @@ enum RepositoryScore {
         for stash in stashes {
             work.append((stash.date, .stash))
         }
+        // Branches the server has but the base does not: unfinished, or merged and left behind.
+        // Unpushed ones are counted above already; a repository without a server gets its one notice instead.
+        if hasRemote, hasBase {
+            for branch in branches where !branch.isBase && branch.unpushedCommits == 0 {
+                work.append((branch.lastCommitDate ?? now, branch.unmergedCommits > 0 ? .unmerged : .leftover))
+            }
+        }
 
         // The repository is as bad as its worst piece of work.
         let worst = work.map { Severity(of: $0.kind, lastChanged: $0.date, now: now) }.max()
@@ -55,6 +66,18 @@ public enum UnsavedWork: Equatable {
 extension Severity {
     /// How bad one piece of unsaved work is, by how long it has been left alone.
     public init(of work: UnsavedWork, lastChanged: Date, now: Date = Date()) {
+        let age = now.timeIntervalSince(lastChanged)
+        switch work {
+        case .unmerged:
+            self = age <= RepositoryScore.unfinishedAge ? .attention : age > RepositoryScore.unfinishedCriticalAge ? .critical : .warning
+            return
+        case .leftover:
+            // Nothing is lost, so clutter never becomes forgotten work.
+            self = age <= RepositoryScore.unfinishedAge ? .clean : .warning
+            return
+        case .uncommitted, .commits, .stash:
+            break
+        }
         let abandonedAfter: TimeInterval
         switch work {
         case .uncommitted, .commits(upstreamGone: false):
@@ -63,12 +86,9 @@ extension Severity {
             // Squash merges leave exactly this: commits on no remote, upstream deleted.
             // Reachability cannot tell that from lost work, so it never becomes critical.
             abandonedAfter = RepositoryScore.goneUpstreamAge
-        case .stash:
+        case .stash, .unmerged, .leftover:
             abandonedAfter = RepositoryScore.abandonedStashAge
-        case .unmerged, .leftover:
-            abandonedAfter = RepositoryScore.abandonedAge
         }
-        let age = now.timeIntervalSince(lastChanged)
         if age <= abandonedAfter {
             self = .attention
         } else if age > RepositoryScore.criticalAge, work != .commits(upstreamGone: true) {
