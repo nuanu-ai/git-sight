@@ -105,6 +105,24 @@ def data_pipeline():
     commit(worktree, "jobs/retry-tests.txt", "Test retry limits", 44)
 
 
+def search_api():
+    # Abandoned on the server: a pushed branch main never got, and a merged one an agent's worktree still holds.
+    repo = repository("search-api", days_ago=80)
+    git(repo, "checkout", "-b", "feature/fuzzy-search")
+    commit(repo, "search/fuzzy.txt", "Match queries with typos", 26)
+    commit(repo, "search/fuzzy-rank.txt", "Rank fuzzy matches below exact ones", 25)
+    git(repo, "push", "-u", "origin", "feature/fuzzy-search")
+    git(repo, "checkout", "-b", "fix/timeouts", "main")
+    commit(repo, "search/timeouts.txt", "Cap query time at two seconds", 40)
+    git(repo, "push", "-u", "origin", "fix/timeouts")
+    git(repo, "checkout", "main")
+    git(repo, "merge", "--ff-only", "fix/timeouts")
+    git(repo, "push", "origin", "main")
+    worktree = WORKSPACE / "agents" / "search-api-timeouts"
+    worktree.parent.mkdir(parents=True, exist_ok=True)
+    git(repo, "worktree", "add", str(worktree), "fix/timeouts")
+
+
 def experiments():
     # No remote: every commit lives only here.
     repo = repository("experiments", remote=False, days_ago=40)
@@ -126,6 +144,7 @@ if __name__ == "__main__":
     mobile_app()
     docs_site()
     data_pipeline()
+    search_api()
     experiments()
     for name in ["website", "design-tokens", "infra-config"]:
         clean(name)

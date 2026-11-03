@@ -101,6 +101,10 @@ struct Finding: Identifiable {
         case branch
         case detached
         case stash
+        /// A branch the server has and the base never got.
+        case unmerged
+        /// Merged branches left lying around, with the worktrees that hold them.
+        case leftover
     }
 
     /// Where the detail column reads this finding from.
@@ -125,6 +129,13 @@ struct Finding: Identifiable {
     /// Why it has that severity, in a few words.
     let reason: String
 
+    /// Leftovers lose nothing, so they get a gray label of their own instead of a verdict.
+    var badge: (title: String, color: Color) {
+        kind == .leftover ? ("Мусор", .gray) : (severity.title, severity.color)
+    }
+
+    var tint: Color { kind == .leftover ? .secondary : severity.tint }
+
     init(
         id: String, kind: Kind, title: String, detail: String, note: String?, date: Date?,
         location: URL, source: Source, verdict: (work: UnsavedWork, lastChanged: Date?)
@@ -140,7 +151,9 @@ struct Finding: Identifiable {
         work = verdict.work
         let lastChanged = verdict.lastChanged ?? Date()
         severity = Severity(of: verdict.work, lastChanged: lastChanged)
-        if severity >= .warning {
+        if verdict.work == .leftover {
+            reason = "можно убрать"
+        } else if severity >= .warning {
             reason = "\(RepositoryText.age(lastChanged)) без движения"
         } else if verdict.work == .commits(upstreamGone: true) {
             reason = "вероятно, уже влита"
@@ -155,6 +168,8 @@ struct Finding: Identifiable {
         case .branch: return "arrow.triangle.branch"
         case .detached: return "point.topleft.down.to.point.bottomright.curvepath"
         case .stash: return "tray"
+        case .unmerged: return "arrow.triangle.pull"
+        case .leftover: return "archivebox"
         }
     }
 }
@@ -191,6 +206,36 @@ extension RepositorySnapshot {
                     verdict: (.commits(upstreamGone: branch.upstreamGone), branch.lastCommitDate)
                 ))
             }
+        }
+        for branch in unfinishedBranches {
+            findings.append(Finding(
+                id: "\(path.path)|unmerged:\(branch.name)",
+                kind: .unmerged,
+                title: branch.name,
+                detail: "не влито в \(baseBranch ?? "main"): \(RepositoryText.commits(branch.unmergedCommits))",
+                note: branch.upstreamGone ? "удалена на сервере" : nil,
+                date: branch.lastCommitDate,
+                location: worktrees.first { $0.branch == branch.name }?.path ?? path,
+                source: .history(directory: path, tips: ["refs/heads/\(branch.name)"]),
+                verdict: (.unmerged, branch.lastCommitDate)
+            ))
+        }
+        let leftovers = leftoverBranches
+        if !leftovers.isEmpty {
+            let held = leftoverWorktrees.count
+            let oldest = leftovers.compactMap(\.lastCommitDate).min()
+            findings.append(Finding(
+                id: "\(path.path)|leftovers",
+                kind: .leftover,
+                title: "Хвосты",
+                detail: [RepositoryText.counted(leftovers.count, one: "ветка влита", few: "ветки влиты", many: "веток влито") + " в \(baseBranch ?? "main")",
+                         held > 0 ? "\(held) ворктри" : nil].compactMap { $0 }.joined(separator: " · "),
+                note: nil,
+                date: oldest,
+                location: path,
+                source: .history(directory: path, tips: leftovers.map { "refs/heads/\($0.name)" }),
+                verdict: (.leftover, oldest)
+            ))
         }
         for worktree in worktrees where worktree.unpushedCommits > 0 {
             findings.append(Finding(
@@ -231,10 +276,20 @@ extension RepositorySnapshot {
         return findings.sorted { ($0.date ?? .distantFuture) < ($1.date ?? .distantFuture) }
     }
 
-    /// The newest change git can see, an edit, a commit or a stash, and what it was.
-    /// "сейчас на main · 3 ветки", the same in the list and above the graph.
+    /// Linked worktrees that hold nothing but a leftover branch.
+    var leftoverWorktrees: [WorktreeSnapshot] {
+        let names = Set(leftoverBranches.map(\.name))
+        return worktrees.filter { names.contains($0.branch ?? "") }
+    }
+
+    /// "сейчас на main · 21 ветка, 13 не влиты · 4 ворктри", the same in the list and above the graph:
+    /// how much is lying around locally.
     var branchesSummary: String {
-        [currentBranch.map { "сейчас на \($0)" }, RepositoryText.counted(branches.count, one: "ветка", few: "ветки", many: "веток")]
+        var branchCount = RepositoryText.counted(branches.count, one: "ветка", few: "ветки", many: "веток")
+        let unfinished = unfinishedBranches.count
+        if unfinished > 0 { branchCount += ", " + RepositoryText.counted(unfinished, one: "не влита", few: "не влиты", many: "не влиты") }
+        let linked = worktrees.filter { !$0.isMain }.count
+        return [currentBranch.map { "сейчас на \($0)" }, branchCount, linked > 0 ? "\(linked) ворктри" : nil]
             .compactMap { $0 }.joined(separator: " · ")
     }
 
@@ -262,6 +317,10 @@ extension RepositorySnapshot {
         let detached = worktrees.filter { $0.unpushedCommits > 0 }.count
         if detached > 0 { parts.append("\(detached) ворктри с коммитами вне веток") }
         if !stashes.isEmpty { parts.append(RepositoryText.counted(stashes.count, one: "стэш", few: "стэша", many: "стэшей")) }
+        let unfinished = unfinishedBranches.count
+        if unfinished > 0 { parts.append(RepositoryText.counted(unfinished, one: "не влита", few: "не влиты", many: "не влиты")) }
+        let leftovers = leftoverBranches.count
+        if leftovers > 0 { parts.append("хвосты: \(leftovers)") }
         if !hasRemote { parts.append("нет remote") }
         return parts.isEmpty ? "всё на сервере" : parts.joined(separator: " · ")
     }
@@ -287,6 +346,17 @@ extension RepositorySnapshot {
         case .detached:
             lines.append("В ворктри \(place) на detached HEAD есть коммиты, которых нет ни в одной ветке и ни на сервере (\(RepositoryText.commits(worktrees.first { $0.path == finding.location }?.unpushedCommits ?? 0))), последний \(ago).")
             lines.append("Создай для них ветку и запушь, либо объясни, почему их можно выбросить.")
+        case .unmerged:
+            lines.append("В репозитории \(RepositoryText.path(path)) ветка `\(finding.title)` есть на сервере, но не влита в \(baseBranch ?? "main"): \(RepositoryText.commits(branches.first { $0.name == finding.title }?.unmergedCommits ?? 0)), последний коммит \(ago).")
+            lines.append("Выясни, что с этой работой. Если она нужна, доведи её до PR и влей. Если устарела или уже не нужна, скажи мне, и ветку можно будет удалить локально и на сервере.")
+        case .leftover:
+            let names = leftoverBranches.map { "`\($0.name)`" }.joined(separator: ", ")
+            lines.append("В репозитории \(RepositoryText.path(path)) лежат ветки, уже влитые в \(baseBranch ?? "main"): \(names). Последний коммит в самой старой \(ago).")
+            let held = leftoverWorktrees.map { RepositoryText.path($0.path) }
+            if !held.isEmpty {
+                lines.append("Они открыты в ворктри: \(held.joined(separator: ", ")).")
+            }
+            lines.append("Проверь, что каждая действительно влита, и предложи список на удаление: `git worktree remove <путь>` для ворктри, `git branch -d <ветка>` для веток. Не используй `-D` и `--force`: если git отказывается удалять, покажи мне почему.")
         case .stash:
             guard case .stash(_, let name, let hash) = finding.source else { break }
             lines.append("В репозитории \(RepositoryText.path(path)) есть стэш \(name) «\(finding.title)», создан \(ago). Его коммит: \(hash).")

@@ -178,11 +178,12 @@ struct RepositorySidebar: View {
         }
     }
 
-    /// The selected repository's work, folded out under its row: uncommitted, then local commits, then stashes.
+    /// The selected repository's work, folded out under its row: uncommitted, local commits, stashes,
+    /// then what the server has but the base does not, then leftovers.
     @ViewBuilder
     private func findings(of repository: RepositorySnapshot) -> some View {
         if repository.path == model.selectedPath {
-            let order: [Finding.Kind] = [.uncommitted, .branch, .detached, .stash]
+            let order: [Finding.Kind] = [.uncommitted, .branch, .detached, .stash, .unmerged, .leftover]
             ForEach(repository.findings.sorted { order.firstIndex(of: $0.kind) ?? 0 < order.firstIndex(of: $1.kind) ?? 0 }) { finding in
                 FindingRow(finding: finding)
                     .tag(finding.id)
@@ -331,16 +332,16 @@ private struct SidebarFooter: View {
 
 /// The verdict as a filled label, the strongest mark in the window.
 private struct SeverityBadge: View {
-    let severity: Severity
+    let finding: Finding
 
     var body: some View {
-        Text(severity.title)
+        Text(finding.badge.title)
             .textRole(.secondary)
             .fontWeight(.semibold)
-            .foregroundStyle(severity == .attention ? Color.black.opacity(0.8) : .white)
+            .foregroundStyle(finding.badge.color == Severity.attention.color ? Color.black.opacity(0.8) : .white)
             .padding(.horizontal, 8)
             .padding(.vertical, 2)
-            .background(Capsule().fill(severity.color))
+            .background(Capsule().fill(finding.badge.color))
     }
 }
 
@@ -422,7 +423,7 @@ private struct FindingRow: View {
         HStack(spacing: SidebarGrid.gap) {
             Image(systemName: finding.systemImage)
                 .imageScale(.small)
-                .selectableTint(finding.severity.tint)
+                .selectableTint(finding.tint)
                 .frame(width: SidebarGrid.marker)
                 .accessibilityHidden(true)
             // The name alone repeats: a worktree on main and the branch main are both "main".
@@ -435,7 +436,7 @@ private struct FindingRow: View {
                 .textRole(.secondary)
                 .fontWeight(finding.severity >= .warning ? .semibold : .regular)
                 .monospacedDigit()
-                .selectableTint(finding.severity.tint)
+                .selectableTint(finding.tint)
         }
         .padding(.leading, SidebarGrid.step * 2)
         .help([finding.title, finding.detail, finding.note].compactMap { $0 }.joined(separator: "\n"))
@@ -563,7 +564,7 @@ private struct FindingHeader: View {
         VStack(alignment: .leading, spacing: 2) {
             // One accent line: the badge names the verdict, the colored reason in the facts explains it.
             HStack(spacing: 10) {
-                SeverityBadge(severity: finding.severity)
+                SeverityBadge(finding: finding)
                 Text(finding.title)
                     .textRole(.title)
                     .fontWeight(.semibold)
@@ -624,7 +625,7 @@ private struct FindingHeader: View {
     private var facts: Text {
         let reason = Text(finding.reason)
             .fontWeight(finding.severity >= .warning ? .medium : .regular)
-            .foregroundStyle(finding.severity.tint)
+            .foregroundStyle(finding.tint)
         let rest = [finding.detail, finding.note].compactMap { $0 }.joined(separator: " · ")
         return Text("\(rest) · ").foregroundStyle(.secondary) + reason
     }
