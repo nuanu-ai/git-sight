@@ -2,6 +2,31 @@ import Foundation
 import GitSightCore
 
 enum RepositoryDiscoveryIntegrationTests {
+    static func testFolderDeletedDuringTheWalkIsNotAProblem() throws {
+        let fileManager = FileManager.default
+        let rootURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent(".build/GitSightTests/\(UUID().uuidString)", isDirectory: true)
+        let doomedURL = rootURL.appendingPathComponent("doomed", isDirectory: true)
+        let keptURL = rootURL.appendingPathComponent("kept", isDirectory: true)
+        try fileManager.createDirectory(at: doomedURL.appendingPathComponent("inner"), withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: keptURL, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: rootURL) }
+        try runGit(in: keptURL, ["init"])
+
+        // Something else deletes the folder after the walk listed it and before it got there,
+        // as an agent's rm -rf does while a scan runs.
+        var problems: [String] = []
+        let found = try RepositoryDiscovery().repositories(under: rootURL, progress: { progress in
+            if progress.scannedDirectories == 1 { try? fileManager.removeItem(at: doomedURL) }
+        }, issue: { url, _ in problems.append(url.lastPathComponent) })
+
+        try expectEqual(found.map(\.lastPathComponent), ["kept"], "the rest of the folder is still searched")
+        try expectEqual(problems, [], "a folder that is gone has nothing to read, so it is no problem")
+    }
+
     static func testLinkedWorktreesReportThroughTheirMainRepository() throws {
         let fileManager = FileManager.default
         let projectRoot = URL(fileURLWithPath: #filePath)

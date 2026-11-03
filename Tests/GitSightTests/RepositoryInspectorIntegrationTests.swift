@@ -53,6 +53,11 @@ enum RepositoryInspectorIntegrationTests {
             failures: &failures
         )
         await run(
+            name: "folder deleted during the walk is not a problem",
+            RepositoryDiscoveryIntegrationTests.testFolderDeletedDuringTheWalkIsNotAProblem,
+            failures: &failures
+        )
+        await run(
             name: "broken repository does not cancel scan",
             RepositoryScannerIntegrationTests.testBrokenRepositoryDoesNotCancelScan,
             failures: &failures
