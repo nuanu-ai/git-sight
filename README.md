@@ -5,8 +5,7 @@
 <h1 align="center">git-sight</h1>
 
 <p align="center">
-  See the work your agents left behind, in every repository at once.<br>
-  A native macOS app. Read-only by design.
+  See the work your agents left behind, in every repository at once.
 </p>
 
 Run a few coding agents for a week and your disk fills with branches nobody pushed, stashes nobody remembers, worktrees an agent created and walked away from. git does not tell you any of this unless you go into each repository and ask.
