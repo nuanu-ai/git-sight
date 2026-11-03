@@ -172,6 +172,35 @@ enum UnfinishedWorkIntegrationTests {
         try expectEqual(try CommitTopologyIntegrationTests.gitOutput(in: repositoryURL, ["count-objects", "-v"]), objectsBefore, "inspecting a partial clone fetches no objects")
     }
 
+    /// A merged branch someone is on, in the main worktree or under uncommitted edits, is in use, not left behind.
+    /// One an agent's clean worktree still holds is.
+    static func testBranchesInUseAreNotLeftovers() throws {
+        let rootURL = scratchURL()
+        let originURL = rootURL.appendingPathComponent("origin.git")
+        let repositoryURL = rootURL.appendingPathComponent("repository")
+        try FileManager.default.createDirectory(at: repositoryURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        let monthAgo = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-30 * 86_400))
+        try runGit(in: rootURL, ["init", "--bare", "-b", "main", originURL.path])
+        try runGit(in: repositoryURL, ["init", "-b", "main"])
+        try runGit(in: repositoryURL, ["config", "user.name", "Test User"])
+        try runGit(in: repositoryURL, ["config", "user.email", "test@example.com"])
+        try "start\n".write(to: repositoryURL.appendingPathComponent("readme.txt"), atomically: true, encoding: .utf8)
+        try runGit(in: repositoryURL, ["add", "readme.txt"])
+        try runGit(in: repositoryURL, ["commit", "-m", "Start"], environment: ["GIT_AUTHOR_DATE": monthAgo, "GIT_COMMITTER_DATE": monthAgo])
+        try runGit(in: repositoryURL, ["remote", "add", "origin", originURL.path])
+        try runGit(in: repositoryURL, ["push", "-u", "origin", "main"])
+        for name in ["held", "busy"] {
+            try runGit(in: repositoryURL, ["worktree", "add", rootURL.appendingPathComponent(name).path, "-b", name])
+        }
+        try "edited\n".write(to: rootURL.appendingPathComponent("busy/readme.txt"), atomically: true, encoding: .utf8)
+        // Just started from main, whose last commit is a month old.
+        try runGit(in: repositoryURL, ["switch", "-c", "wip"])
+
+        let snapshot = try RepositoryInspector().inspect(repositoryAt: repositoryURL)
+        try expectEqual(snapshot.leftoverBranches.map(\.name), ["held"], "only the branch in an idle worktree is left behind")
+    }
+
     private static func scratchURL() -> URL {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

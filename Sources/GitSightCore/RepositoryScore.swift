@@ -37,11 +37,10 @@ enum RepositoryScore {
         for stash in stashes {
             work.append((stash.date, .stash))
         }
-        // Branches the server has but the base does not: unfinished, or merged and left behind.
-        // Unpushed ones are counted above already; a repository without a server gets its one notice instead.
+        // A repository without a server gets its one notice instead.
         if hasRemote, hasBase {
-            for branch in branches where !branch.isBase && !branch.isUnrelated && branch.unpushedCommits == 0 {
-                work.append((branch.lastCommitDate ?? now, branch.unmergedCommits > 0 ? .unmerged : .leftover))
+            for (branch, kind) in mergeWork(branches: branches, worktrees: worktrees) {
+                work.append((branch.lastCommitDate ?? now, kind))
             }
         }
 
@@ -49,6 +48,29 @@ enum RepositoryScore {
         let rated = work.map { (date: $0.date, severity: Severity(of: $0.kind, lastChanged: $0.date, now: now)) }
         let worst = rated.map(\.severity).max()
         return (worst ?? (hasRemote ? .clean : .attention), rated.filter { $0.severity > .clean }.map(\.date).min())
+    }
+
+    /// Branches the server has but the base does not, unfinished, or merged and left behind.
+    /// Unpushed ones belong to the commits above.
+    static func mergeWork(branches: [BranchSnapshot], worktrees: [WorktreeSnapshot]) -> [(branch: BranchSnapshot, kind: UnsavedWork)] {
+        branches.filter { !$0.isBase && !$0.isUnrelated && $0.unpushedCommits == 0 }
+            .map { ($0, $0.unmergedCommits > 0 ? .unmerged : .leftover) }
+    }
+}
+
+extension RepositorySnapshot {
+    /// Branches the server has and the base never got: unfinished work that goes stale.
+    public var unfinishedBranches: [BranchSnapshot] {
+        guard hasRemote, baseBranch != nil else { return [] }
+        return RepositoryScore.mergeWork(branches: branches, worktrees: worktrees).filter { $0.kind == .unmerged }.map(\.branch)
+    }
+
+    /// Merged branches still here past the usual cleanup lag.
+    public var leftoverBranches: [BranchSnapshot] {
+        guard hasRemote, baseBranch != nil else { return [] }
+        return RepositoryScore.mergeWork(branches: branches, worktrees: worktrees)
+            .filter { $0.kind == .leftover && Severity(of: .leftover, lastChanged: $0.branch.lastCommitDate ?? Date()) > .clean }
+            .map(\.branch)
     }
 }
 
