@@ -10,7 +10,7 @@ enum VisualRenderer {
     static func main() async throws {
         let arguments = CommandLine.arguments
         guard arguments.count >= 8, let width = Int(arguments[5]), let height = Int(arguments[6]) else {
-            print("Usage: render <out.png> <folder> <repository|-> <uncommitted|branch|detached|stash|-> <width> <height> <light|dark> [select]")
+            print("Usage: render <out.png> <folder> <repository|-> <uncommitted|branch|detached|stash|graph|-> <width> <height> <light|dark> [select]")
             exit(2)
         }
         let output = URL(fileURLWithPath: arguments[1])
@@ -24,7 +24,9 @@ enum VisualRenderer {
         while model.isScanning { try await Task.sleep(for: .milliseconds(50)) }
         if arguments[3] != "-", let repository = model.repositories.first(where: { $0.name == arguments[3] }) {
             model.selectedPath = repository.path
-            if arguments[4] != "-", let finding = repository.findings.first(where: { "\($0.kind)" == arguments[4] }) {
+            if arguments[4] == "graph" {
+                model.selectedFindingID = WorkspaceModel.graphID(of: repository)
+            } else if arguments[4] != "-", let finding = repository.findings.first(where: { "\($0.kind)" == arguments[4] }) {
                 model.selectedFindingID = finding.id
             }
         }

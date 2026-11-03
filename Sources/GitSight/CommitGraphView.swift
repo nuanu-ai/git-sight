@@ -193,6 +193,13 @@ private struct CommitRow: View {
             ForEach(commit.refs, id: \.self) { ref in
                 RefBadge(ref: ref, color: laneColor)
             }
+            if commit.isUnpushed {
+                Image(systemName: "icloud.slash")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .help("Этого коммита нет на сервере")
+                    .accessibilityLabel("нет на сервере")
+            }
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 6)

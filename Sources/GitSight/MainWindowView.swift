@@ -371,25 +371,27 @@ private struct FindingList: View {
     var body: some View {
         if let repository = model.selectedRepository {
             let findings = repository.findings
-            Group {
-                if findings.isEmpty {
-                    ContentUnavailableView {
-                        Label(
-                            repository.hasRemote ? "Всё на сервере" : "Нет remote",
-                            systemImage: repository.hasRemote ? "checkmark.circle" : "externaldrive"
-                        )
-                    } description: {
-                        Text(repository.hasRemote
-                             ? "Здесь нет работы, которой не было бы на сервере."
-                             : "У репозитория нет remote, вся история есть только на этом компьютере.")
-                    }
-                } else {
-                    List(selection: $model.selectedFindingID) {
-                        section("Не закоммичено", findings.filter { $0.kind == .uncommitted })
-                        section("Нет на сервере", findings.filter { $0.kind == .branch || $0.kind == .detached })
-                        section("Стэши", findings.filter { $0.kind == .stash })
+            List(selection: $model.selectedFindingID) {
+                // Every section has a title: a section without one turns the list into an outline,
+                // which insets its rows differently.
+                Section("Репозиторий") {
+                    GraphRow(repository: repository)
+                        .tag(WorkspaceModel.graphID(of: repository))
+                    if findings.isEmpty {
+                        // Nothing to fix; the graph above is still there to watch. Kept on the rows' text column.
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Color.clear.frame(width: 16, height: 1)
+                            Text(repository.hasRemote
+                                 ? "Всё на сервере: здесь нет работы, которой не было бы на сервере."
+                                 : "Нет remote: вся история есть только на этом компьютере.")
+                                .foregroundStyle(.secondary)
+                        }
+                        .selectionDisabled()
                     }
                 }
+                section("Не закоммичено", findings.filter { $0.kind == .uncommitted })
+                section("Нет на сервере", findings.filter { $0.kind == .branch || $0.kind == .detached })
+                section("Стэши", findings.filter { $0.kind == .stash })
             }
         } else {
             ContentUnavailableView("Выберите репозиторий", systemImage: "sidebar.left")
@@ -406,6 +408,28 @@ private struct FindingList: View {
                 }
             }
         }
+    }
+}
+
+/// The whole repository's graph, on the same columns as the findings below it.
+private struct GraphRow: View {
+    let repository: RepositorySnapshot
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: "point.3.connected.trianglepath.dotted")
+                .foregroundStyle(.secondary)
+                .frame(width: 16)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Все ветки")
+                Text(repository.branchesSummary)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 2)
     }
 }
 
@@ -453,6 +477,12 @@ private struct FindingDetail: View {
                 Divider()
                 content
             }
+        } else if model.showsGraph, let repository = model.selectedRepository {
+            VStack(spacing: 0) {
+                GraphHeader(repository: repository)
+                Divider()
+                content
+            }
         } else {
             Color.clear
         }
@@ -481,6 +511,33 @@ private struct FindingDetail: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+    }
+}
+
+private struct GraphHeader: View {
+    let repository: RepositorySnapshot
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Все ветки")
+                .font(.title2.weight(.semibold))
+            Text(repository.branchesSummary)
+                .foregroundStyle(.secondary)
+            Text(RepositoryText.path(repository.path))
+                .font(.body.monospaced())
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .textSelection(.enabled)
+            HStack(spacing: 8) {
+                Button("Показать в Finder") { Workspace.reveal(repository.path) }
+                Button("Открыть в Терминале") { Workspace.openTerminal(at: repository.path) }
+            }
+            .controlSize(.large)
+            .padding(.top, 6)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

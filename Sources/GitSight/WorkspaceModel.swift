@@ -35,7 +35,7 @@ final class WorkspaceModel {
     var selectedPath: URL? {
         didSet {
             guard selectedPath != oldValue else { return }
-            selectedFindingID = selectedRepository?.findings.first?.id
+            selectedFindingID = selectedRepository.map { $0.findings.first?.id ?? Self.graphID(of: $0) }
         }
     }
     var selectedFindingID: String? {
@@ -85,6 +85,15 @@ final class WorkspaceModel {
 
     var selectedFinding: Finding? {
         selectedRepository?.findings.first { $0.id == selectedFindingID }
+    }
+
+    /// The middle column's first item: the graph of the whole repository, selected like a finding.
+    static func graphID(of repository: RepositorySnapshot) -> String {
+        "\(repository.path.path)|graph"
+    }
+
+    var showsGraph: Bool {
+        selectedRepository.map { selectedFindingID == Self.graphID(of: $0) } ?? false
     }
 
     var filteredRepositories: [RepositorySnapshot] {
@@ -193,10 +202,10 @@ final class WorkspaceModel {
         if selectedRepository == nil {
             selectedPath = repositories.first?.path
         } else if let repository = selectedRepository, changed?.contains(repository.path) ?? true {
-            if repository.findings.contains(where: { $0.id == previousFinding }) {
+            if previousFinding == Self.graphID(of: repository) || repository.findings.contains(where: { $0.id == previousFinding }) {
                 loadContent(refreshing: true)
             } else {
-                selectedFindingID = repository.findings.first?.id
+                selectedFindingID = repository.findings.first?.id ?? Self.graphID(of: repository)
             }
         }
     }
@@ -249,10 +258,15 @@ final class WorkspaceModel {
             commitFiles = nil
             selectedCommitHash = nil
         }
-        guard let finding = selectedFinding else { return }
-        let id = finding.id
+        guard let id = selectedFindingID else { return }
+        let finding = selectedFinding
+        let graphOf = showsGraph ? selectedRepository?.path : nil
         let worker = Task.detached(priority: .userInitiated) { () throws -> FindingContent in
             let inspector = RepositoryInspector()
+            guard let finding else {
+                guard let graphOf else { throw CancellationError() }
+                return .history(try inspector.repositoryHistory(in: graphOf))
+            }
             switch finding.source {
             case .history(let directory, let revisions):
                 return .history(try inspector.history(in: directory, revisions: revisions))

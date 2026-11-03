@@ -231,6 +231,12 @@ extension RepositorySnapshot {
     }
 
     /// The newest change git can see, an edit, a commit or a stash, and what it was.
+    /// "сейчас на main · 3 ветки", the same in the list and above the graph.
+    var branchesSummary: String {
+        [currentBranch.map { "сейчас на \($0)" }, RepositoryText.counted(branches.count, one: "ветка", few: "ветки", many: "веток")]
+            .compactMap { $0 }.joined(separator: " · ")
+    }
+
     /// What happened last, e.g. "main: 2 файла не закоммичено".
     var latestChangeText: (date: Date, text: String)? {
         latestChange.map { change in
