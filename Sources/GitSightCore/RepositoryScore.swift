@@ -40,14 +40,15 @@ enum RepositoryScore {
         // Branches the server has but the base does not: unfinished, or merged and left behind.
         // Unpushed ones are counted above already; a repository without a server gets its one notice instead.
         if hasRemote, hasBase {
-            for branch in branches where !branch.isBase && branch.unpushedCommits == 0 {
+            for branch in branches where !branch.isBase && !branch.isUnrelated && branch.unpushedCommits == 0 {
                 work.append((branch.lastCommitDate ?? now, branch.unmergedCommits > 0 ? .unmerged : .leftover))
             }
         }
 
-        // The repository is as bad as its worst piece of work.
-        let worst = work.map { Severity(of: $0.kind, lastChanged: $0.date, now: now) }.max()
-        return (worst ?? (hasRemote ? .clean : .attention), work.map(\.date).min())
+        // The repository is as bad as its worst piece of work; a merged branch within its cleanup lag is no work.
+        let rated = work.map { (date: $0.date, severity: Severity(of: $0.kind, lastChanged: $0.date, now: now)) }
+        let worst = rated.map(\.severity).max()
+        return (worst ?? (hasRemote ? .clean : .attention), rated.filter { $0.severity > .clean }.map(\.date).min())
     }
 }
 

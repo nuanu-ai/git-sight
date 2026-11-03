@@ -18,7 +18,8 @@ struct GitRunner {
             "-c", "log.showSignature=false", "-C", repositoryURL.path
         ] + arguments
         var environment = ProcessInfo.processInfo.environment.filter { !$0.key.hasPrefix("GIT_") }
-        environment.merge(["GIT_OPTIONAL_LOCKS": "0", "LC_ALL": "C", "LANG": "C"]) { _, new in new }
+        // A partial clone would fetch missing objects from the server and write them in; reading fails instead.
+        environment.merge(["GIT_OPTIONAL_LOCKS": "0", "GIT_NO_LAZY_FETCH": "1", "LC_ALL": "C", "LANG": "C"]) { _, new in new }
         if !config.isEmpty {
             environment["GIT_CONFIG_COUNT"] = String(config.count)
             for (index, entry) in config.enumerated() {
