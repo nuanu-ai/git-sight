@@ -44,8 +44,12 @@ if [ -n "$LAST" ] && [ "$BUILD" -le "$LAST" ]; then
     echo "Build $BUILD is not above the last released build $LAST. Was main rewritten?" >&2
     exit 1
 fi
-plutil -replace CFBundleShortVersionString -string "$VERSION" "$PLIST"
-plutil -replace CFBundleVersion -string "$BUILD" "$PLIST"
+# sed, not plutil -replace, which rewrites the whole file with tabs.
+set_plist() {
+    sed -i '' "/<key>$1<\/key>/{n;s|<string>.*</string>|<string>$2</string>|;}" "$PLIST"
+}
+set_plist CFBundleShortVersionString "$VERSION"
+set_plist CFBundleVersion "$BUILD"
 
 sh Scripts/package_app.sh
 
