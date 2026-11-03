@@ -231,26 +231,16 @@ extension RepositorySnapshot {
     }
 
     /// The newest change git can see, an edit, a commit or a stash, and what it was.
-    var latestChange: (date: Date, text: String)? {
-        var latest: (date: Date, text: String)?
-        func consider(_ date: Date?, _ text: @autoclosure () -> String) {
-            guard let date, date > (latest?.date ?? .distantPast) else { return }
-            latest = (date, text())
-        }
-        for worktree in worktrees {
-            let place = worktree.isMain ? (worktree.branch ?? "detached HEAD") : worktree.name
-            if worktree.dirtyFileCount > 0 {
-                consider(worktree.dirtyModifiedAt, "\(place): \(RepositoryText.files(worktree.dirtyFileCount)) не закоммичено")
+    /// What happened last, e.g. "main: 2 файла не закоммичено".
+    var latestChangeText: (date: Date, text: String)? {
+        latestChange.map { change in
+            let place = change.place.map { "\($0): " } ?? ""
+            switch change.kind {
+            case .uncommitted(let files): return (change.date, "\(place)\(RepositoryText.files(files)) не закоммичено")
+            case .commit: return (change.date, "\(place)новый коммит")
+            case .stash: return (change.date, "новый стэш")
             }
-            consider(worktree.lastActivity, "\(place): новый коммит")
         }
-        for branch in branches {
-            consider(branch.lastCommitDate, "\(branch.name): новый коммит")
-        }
-        for stash in stashes {
-            consider(stash.date, "новый стэш")
-        }
-        return latest
     }
 
     /// One line for the sidebar: what is at stake.

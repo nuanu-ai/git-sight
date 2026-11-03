@@ -93,6 +93,23 @@ public struct RecentChange: Equatable {
 
 extension RepositorySnapshot {
     public var latestChange: RecentChange? {
-        nil
+        var latest: RecentChange?
+        func consider(_ date: Date?, _ place: String?, _ kind: RecentChange.Kind) {
+            guard let date, date > (latest?.date ?? .distantPast) else { return }
+            latest = RecentChange(date: date, place: place, kind: kind)
+        }
+        for worktree in worktrees {
+            let place = worktree.isMain ? (worktree.branch ?? "detached HEAD") : worktree.name
+            // dirtyModifiedAt is nil when nothing is uncommitted.
+            consider(worktree.dirtyModifiedAt, place, .uncommitted(files: worktree.dirtyFileCount))
+            consider(worktree.lastActivity, place, .commit)
+        }
+        for branch in branches {
+            consider(branch.lastCommitDate, branch.name, .commit)
+        }
+        for stash in stashes {
+            consider(stash.date, nil, .stash)
+        }
+        return latest
     }
 }

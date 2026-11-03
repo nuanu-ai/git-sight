@@ -153,7 +153,7 @@ private struct RepositorySidebar: View {
     private func list(now: Date) -> some View {
         let all = model.filteredRepositories
         let active = all
-            .compactMap { repository in repository.latestChange.map { (repository, $0) } }
+            .compactMap { repository in repository.latestChangeText.map { (repository, $0) } }
             .filter { abs(now.timeIntervalSince($0.1.date)) < Self.activeWindow }
             .sorted { $0.1.date > $1.1.date }
         let activePaths = Set(active.map(\.0.path))
