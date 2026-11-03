@@ -308,7 +308,11 @@ public struct RepositoryInspector {
         }
         // An orphan branch with no commits yet leaves HEAD pointing nowhere, and naming it would fail the log.
         let head = try git.optionalOutput(in: repositoryURL, ["rev-parse", "--verify", "--quiet", "HEAD"]) == nil ? [] : ["HEAD"]
-        let tips = ["--branches"] + head + detached.map(\.head)
+        // The commit each stash was made on, its first parent, stays in the graph after its branch is deleted.
+        // git log reads the stash list in a bare repository too, where git stash refuses; no stash prints nothing.
+        let stashBases = try git.output(in: repositoryURL, ["log", "--walk-reflogs", "--ignore-missing", "--format=%P", "refs/stash", "--"])
+            .split(separator: "\n").compactMap { $0.split(separator: " ").first.map(String.init) }
+        let tips = ["--branches"] + head + detached.map(\.head) + stashBases
         var commits = try marked(history(in: repositoryURL, revisions: tips + ["--remotes", "--tags"], limit: limit), tips: tips, in: repositoryURL)
         for (name, head) in detached {
             if let index = commits.firstIndex(where: { $0.fullHash == head }) {
@@ -472,7 +476,9 @@ public struct RepositoryInspector {
                 dirtyModifiedAt: dirty.modifiedAt,
                 lastActivity: entry.branch.flatMap { branchDates[$0] ?? nil } ?? entry.head.flatMap { headDates[$0] },
                 behind: branches.first { $0.name == entry.branch }?.behind ?? 0,
-                unpushedCommits: detachedCommits
+                unpushedCommits: detachedCommits,
+                // A branch with no commits yet is listed at a hash of zeros.
+                head: entry.head.flatMap { $0.contains { $0 != "0" } ? $0 : nil }
             )
         }
     }
@@ -830,12 +836,14 @@ public struct RepositoryInspector {
 
     private func stashes(in repositoryURL: URL) throws -> [StashSnapshot] {
         let output = try git.output(in: repositoryURL, [
-            "stash", "list", "--pretty=format:%gd%x1F%H%x1F%gs%x1F%cI%x1E"
+            "stash", "list", "--pretty=format:%gd%x1F%H%x1F%gs%x1F%cI%x1F%P%x1E"
         ])
         return try Self.records(output).map { record in
             let fields = Self.fields(record)
-            guard fields.count >= 4, let date = Self.date(from: fields[3]) else { throw Self.parseError(record) }
-            return StashSnapshot(name: fields[0], hash: fields[1], message: fields[2], date: date)
+            guard fields.count >= 5, let date = Self.date(from: fields[3]) else { throw Self.parseError(record) }
+            // The first parent is the commit the stash was made on.
+            let base = fields[4].split(separator: " ").first.map(String.init)
+            return StashSnapshot(name: fields[0], hash: fields[1], message: fields[2], date: date, base: base)
         }
     }
 

@@ -117,10 +117,20 @@ public struct StashSnapshot: Equatable {
     }
 
     /// The branch the stash was made on, as its message names it; nil when it was made on no branch.
-    public var branch: String? { nil }
+    public var branch: String? { parsedMessage?.branch }
 
     /// The message without the branch git writes before it.
-    public var text: String { message }
+    public var text: String { parsedMessage?.text ?? message }
+
+    /// git writes "On <branch>: <message>", or "WIP on <branch>: <hash> <subject>" without one.
+    /// A branch name never holds ": ".
+    private var parsedMessage: (branch: String?, text: String)? {
+        guard let prefix = ["WIP on ", "On "].first(where: message.hasPrefix) else { return nil }
+        let start = message.index(message.startIndex, offsetBy: prefix.count)
+        guard let colon = message.range(of: ": ", range: start..<message.endIndex) else { return nil }
+        let branch = String(message[start..<colon.lowerBound])
+        return (branch == "(no branch)" ? nil : branch, String(message[colon.upperBound...]))
+    }
 }
 
 public struct CommitSnapshot: Equatable {
