@@ -57,7 +57,7 @@ public struct RepositoryDiscovery {
                             ]
                         )
                     }
-                    issue(directoryURL, nsError)
+                    if !Self.isGone(nsError) { issue(directoryURL, nsError) }
                     children = nil
                 }
                 for child in (children ?? []).sorted(by: { $0.path < $1.path }) {
@@ -80,6 +80,13 @@ public struct RepositoryDiscovery {
             ))
         }
         return repositories.sorted { $0.path < $1.path }
+    }
+
+    /// A folder deleted after the walk listed it, as an agent's rm -rf does mid-scan:
+    /// nothing is left to read, so there is nothing to report. A missing root still fails the scan above.
+    private static func isGone(_ error: NSError) -> Bool {
+        (error.domain == NSCocoaErrorDomain && (error.code == NSFileReadNoSuchFileError || error.code == NSFileNoSuchFileError))
+            || (error.domain == NSPOSIXErrorDomain && error.code == Int(ENOENT))
     }
 
     /// A linked worktree's `.git` file points at `<main>/.git/worktrees/<name>`, or at
