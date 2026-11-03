@@ -42,6 +42,49 @@ enum RepositoryWatcherIntegrationTests {
         withExtendedLifetime(watcher) {}
     }
 
+    static func testIgnoredFilesAreNotChanges() async throws {
+        let rootURL = makeRoot()
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        let repositoryURL = try makeRepository(at: rootURL.appendingPathComponent("repository"))
+        try "build/\n".write(to: repositoryURL.appendingPathComponent(".gitignore"), atomically: true, encoding: .utf8)
+        try runGit(in: repositoryURL, ["add", ".gitignore"])
+        try runGit(in: repositoryURL, ["commit", "-m", "Ignore build output"])
+        let repository = try RepositoryInspector().inspect(repositoryAt: repositoryURL)
+        let changes = ChangeLog()
+        let watcher = RepositoryWatcher(repositories: [repository]) { changes.add($0) }
+        try await Task.sleep(for: .milliseconds(500))
+
+        // A build writing its output must not reread the repository over and over.
+        let buildURL = repositoryURL.appendingPathComponent("build/objects")
+        try FileManager.default.createDirectory(at: buildURL, withIntermediateDirectories: true)
+        for number in 0..<20 {
+            try "object \(number)\n".write(to: buildURL.appendingPathComponent("\(number).o"), atomically: true, encoding: .utf8)
+        }
+        try await Task.sleep(for: .seconds(1))
+        try expectEqual(changes.paths, [], "writes to ignored files are not reported")
+
+        try "edit\n".write(to: repositoryURL.appendingPathComponent("tracked.txt"), atomically: true, encoding: .utf8)
+        try await changes.wait()
+        try expectEqual(changes.paths, [repository.path], "an edit next to ignored files is still reported")
+        withExtendedLifetime(watcher) {}
+    }
+
+    static func testReportsARepositoryInTheTemporaryFolder() async throws {
+        // FSEvents names /var/folders as /private/var/folders.
+        let rootURL = FileManager.default.temporaryDirectory.appendingPathComponent("GitSightTests-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        let repositoryURL = try makeRepository(at: rootURL.appendingPathComponent("repository"))
+        let repository = try RepositoryInspector().inspect(repositoryAt: repositoryURL)
+        let changes = ChangeLog()
+        let watcher = RepositoryWatcher(repositories: [repository]) { changes.add($0) }
+        try await Task.sleep(for: .milliseconds(500))
+
+        try "edit\n".write(to: repositoryURL.appendingPathComponent("tracked.txt"), atomically: true, encoding: .utf8)
+        try await changes.wait()
+        try expectEqual(changes.paths, [repository.path], "an edit in the temporary folder is reported")
+        withExtendedLifetime(watcher) {}
+    }
+
     private static func makeRoot() -> URL {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

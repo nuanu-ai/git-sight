@@ -110,7 +110,9 @@ enum RepositoryInspectorIntegrationTests {
             ("uncommitted and stashed files are listed", ChangedFilesIntegrationTests.testReportsUncommittedAndStashedFiles),
             ("stash keeps its files when another is pushed", ChangedFilesIntegrationTests.testStashKeepsItsFilesWhenAnotherIsPushed),
             ("watcher reports only the repository that changed", RepositoryWatcherIntegrationTests.testReportsOnlyTheRepositoryThatChanged),
-            ("watcher reports a worktree outside the folder as its repository", RepositoryWatcherIntegrationTests.testReportsAWorktreeOutsideTheFolderAsItsRepository)
+            ("watcher reports a worktree outside the folder as its repository", RepositoryWatcherIntegrationTests.testReportsAWorktreeOutsideTheFolderAsItsRepository),
+            ("watcher ignores files git ignores", RepositoryWatcherIntegrationTests.testIgnoredFilesAreNotChanges),
+            ("watcher reports a repository in the temporary folder", RepositoryWatcherIntegrationTests.testReportsARepositoryInTheTemporaryFolder)
         ] {
             await run(name: name, test, failures: &failures)
         }
