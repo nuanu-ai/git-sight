@@ -128,7 +128,7 @@ private struct WorkspaceStateView: View {
 
 // MARK: - Sidebar
 
-private struct RepositorySidebar: View {
+struct RepositorySidebar: View {
     @Bindable var model: WorkspaceModel
     /// Sections the user folded, by key; "Чисто" starts folded.
     @AppStorage("collapsedSidebarSections") private var collapsed = "clean"
@@ -175,29 +175,25 @@ private struct RepositorySidebar: View {
         let activePaths = Set(active.map(\.0.path))
         let repositories = all.filter { !activePaths.contains($0.path) }
         return List(selection: $model.selectedPath) {
+            // Headers are plain rows rather than section headers: the list insets section headers
+            // differently from rows, and one inset keeps chevrons, dots, names and numbers on shared lines.
             if !active.isEmpty {
-                Section {
-                    if isExpanded("now") {
-                        ForEach(active, id: \.0.path) { repository, change in
-                            RepositoryRow(repository: repository, activity: change)
-                        }
+                SidebarHeader(title: "Сейчас", color: .accentColor, count: active.count, isExpanded: expansion("now"))
+                if isExpanded("now") {
+                    ForEach(active, id: \.0.path) { repository, change in
+                        RepositoryRow(repository: repository, activity: change)
                     }
-                } header: {
-                    SidebarHeader(title: "Сейчас", icon: "dot.radiowaves.left.and.right", color: .accentColor, count: active.count, isExpanded: expansion("now"))
                 }
             }
             ForEach([Severity.critical, .warning, .attention, .clean], id: \.self) { severity in
                 let group = repositories.filter { $0.severity == severity }
                 let key = "\(severity)"
                 if !group.isEmpty {
-                    Section {
-                        if isExpanded(key) {
-                            ForEach(group, id: \.path) { repository in
-                                RepositoryRow(repository: repository)
-                            }
+                    SidebarHeader(title: severity.title, color: severity.color, count: group.count, isExpanded: expansion(key))
+                    if isExpanded(key) {
+                        ForEach(group, id: \.path) { repository in
+                            RepositoryRow(repository: repository)
                         }
-                    } header: {
-                        SidebarHeader(title: severity.title, icon: nil, color: severity.color, count: group.count, isExpanded: expansion(key))
                     }
                 }
             }
@@ -211,15 +207,17 @@ private struct RepositoryRow: View {
     var activity: (date: Date, text: String)?
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: SidebarGrid.gap) {
             Circle()
                 .fill(repository.severity.color)
                 .frame(width: 7, height: 7)
+                .frame(width: SidebarGrid.marker)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 1) {
                 Text(repository.name)
                     .lineLimit(1)
-                Text(activity.map { "\($0.text) · \(RepositoryText.age($0.date, short: true))" } ?? repository.summary)
+                // The age on the right already says when; the line says what.
+                Text(activity?.text ?? repository.summary)
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -320,11 +318,16 @@ private struct SeverityBadge: View {
 
 
 
-/// A tinted band that folds its section, so groups read apart from the repositories in them.
+/// The columns every sidebar row shares, headers included, so nothing drifts between them.
+enum SidebarGrid {
+    /// The leading column: a repository's dot, a group's chevron.
+    static let marker: CGFloat = 10
+    static let gap: CGFloat = 8
+}
+
+/// A group of repositories that folds on click. It sits on the same columns as the rows below it.
 private struct SidebarHeader: View {
     let title: String
-    /// A symbol, or nil for a dot in the group's color.
-    let icon: String?
     let color: Color
     let count: Int
     @Binding var isExpanded: Bool
@@ -333,36 +336,28 @@ private struct SidebarHeader: View {
         Button {
             withAnimation(.snappy(duration: 0.2)) { isExpanded.toggle() }
         } label: {
-            HStack(spacing: 7) {
+            HStack(spacing: SidebarGrid.gap) {
                 Image(systemName: "chevron.right")
                     .font(.caption.weight(.bold))
                     .foregroundStyle(.secondary)
                     .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                    .frame(width: 10)
-                if let icon {
-                    Image(systemName: icon)
-                        .foregroundStyle(color)
-                } else {
-                    Circle()
-                        .fill(color)
-                        .frame(width: 9, height: 9)
-                }
+                    .frame(width: SidebarGrid.marker)
                 Text(title)
                     .font(.headline)
-                    .foregroundStyle(.primary)
                 Spacer(minLength: 4)
                 Text("\(count)")
                     .font(.subheadline.weight(.semibold))
                     .monospacedDigit()
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(color == Severity.attention.color ? Color.black.opacity(0.8) : .white)
+                    .padding(.horizontal, 7)
+                    .background(Capsule().fill(color))
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background(RoundedRectangle(cornerRadius: 6).fill(color.opacity(0.13)))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .padding(.top, 4)
+        // More room above a group than inside it.
+        .padding(.top, 10)
+        .padding(.bottom, 2)
         .accessibilityLabel("\(title), \(count)")
         .accessibilityValue(isExpanded ? "развёрнуто" : "свёрнуто")
     }

@@ -85,8 +85,8 @@ struct CommitGraph: View {
                 }
         case .file(let file):
             FileRow(file: file)
-                .padding(.leading, railWidth + 22)
-                .padding(.trailing, 16)
+                .padding(.leading, railWidth + 18)
+                .padding(.trailing, 14)
         case .note(let text):
             HStack {
                 if let text {
@@ -96,7 +96,7 @@ struct CommitGraph: View {
                 }
                 Spacer()
             }
-            .padding(.leading, railWidth + 22)
+            .padding(.leading, railWidth + 18)
         }
     }
 
@@ -183,13 +183,8 @@ private struct CommitRow: View {
     let isSelected: Bool
 
     var body: some View {
+        // Only what VS Code shows: the subject and its labels. Hash, author and date are in the tooltip.
         HStack(spacing: 6) {
-            if !commit.isBoundary {
-                Image(systemName: isSelected ? "chevron.down" : "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-                    .frame(width: 12)
-            }
             Text(commit.isBoundary ? "\(boundaryLabel): \(commit.subject)" : commit.subject)
                 .foregroundStyle(commit.isBoundary ? .secondary : .primary)
                 .lineLimit(1)
@@ -198,11 +193,7 @@ private struct CommitRow: View {
             ForEach(commit.refs, id: \.self) { ref in
                 RefBadge(ref: ref, color: laneColor)
             }
-            Spacer(minLength: 8)
-            Text(RepositoryText.age(commit.date, short: true))
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-                .fixedSize()
+            Spacer(minLength: 0)
         }
         .padding(.horizontal, 6)
         .frame(maxHeight: .infinity)
@@ -211,7 +202,7 @@ private struct CommitRow: View {
                 .fill(isSelected ? Color.accentColor.opacity(0.18) : .clear)
         )
         .padding(.trailing, 8)
-        .help("\(commit.subject)\n\(commit.shortHash) · \(commit.author) · \(RepositoryText.fullDate(commit.date))")
+        .help("\(commit.subject)\n\(commit.shortHash) · \(commit.author) · \(RepositoryText.fullDate(commit.date)), \(RepositoryText.ago(commit.date))")
     }
 }
 
@@ -222,7 +213,7 @@ private struct RefBadge: View {
 
     var body: some View {
         // Local branches take the lane's color; what lives elsewhere stays grey.
-        let isLocal = ref.kind == .branch || ref.kind == .head
+        let isLocal = ref.kind != .remoteBranch && ref.kind != .tag
         HStack(spacing: 3) {
             Image(systemName: icon)
                 .font(.caption2.weight(.semibold))
@@ -244,6 +235,7 @@ private struct RefBadge: View {
         case .remoteBranch: return "cloud"
         case .tag: return "tag"
         case .head: return "smallcircle.filled.circle"
+        case .worktree: return "folder"
         }
     }
 
@@ -253,6 +245,7 @@ private struct RefBadge: View {
         case .remoteBranch: return "\(ref.name) на сервере"
         case .tag: return "Тег \(ref.name)"
         case .head: return "HEAD без ветки"
+        case .worktree: return "Ворктри \(ref.name), HEAD без ветки"
         }
     }
 }
