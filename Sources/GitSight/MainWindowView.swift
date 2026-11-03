@@ -130,8 +130,8 @@ private struct WorkspaceStateView: View {
 
 struct RepositorySidebar: View {
     @Bindable var model: WorkspaceModel
-    /// Sections the user folded, by key; "Чисто" starts folded.
-    @AppStorage("collapsedSidebarSections") private var collapsed = "clean"
+    /// Sections the user folded, by key. All start open: clean repositories are still worth watching.
+    @AppStorage("collapsedSidebarSections") private var collapsed = ""
 
     /// Changes newer than this put a repository under "Сейчас".
     private static let activeWindow: TimeInterval = 15 * 60
