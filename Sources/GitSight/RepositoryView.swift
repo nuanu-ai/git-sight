@@ -167,7 +167,7 @@ private struct PlaceList: View {
     private func head(now: Date) -> some View {
         let weight = repository.weight(now: now)
         return VStack(alignment: .leading, spacing: 4) {
-            // The button is centered on the title's line, the same way "Agent task" sits over the graph.
+            // The button is centered on the title's line, the same way the selection's sits over the graph.
             HStack(alignment: .center, spacing: 8) {
                 Text(repository.name)
                     .textRole(.title)
@@ -177,8 +177,8 @@ private struct PlaceList: View {
                     .textSelection(.enabled)
                 Spacer(minLength: 8)
                 if weight > 0 {
-                    CopyButton(model: model, id: repository.path.path, title: "Clean-up task", prominent: false,
-                               help: "Copy a task for an agent to sort out this repository") {
+                    CopyButton(model: model, id: repository.path.path,
+                               help: "Copy a task for an agent to sort out everything in this repository") {
                         WorkText.task(for: repository, now: now)
                     }
                 }
@@ -451,11 +451,11 @@ private struct WorkChip: View {
 }
 
 /// Copies a task to the clipboard; the icon turns into a checkmark for a moment, the label stays.
+/// The repository's button and the selection's look the same: they differ only in what they cover,
+/// which their place says, next to the repository's name or the branch's.
 private struct CopyButton: View {
     let model: WorkspaceModel
     let id: String
-    let title: String
-    let prominent: Bool
     let help: String
     let text: () -> String
 
@@ -467,24 +467,12 @@ private struct CopyButton: View {
             HStack(spacing: 6) {
                 Image(systemName: copied ? "checkmark" : "doc.on.clipboard")
                     .frame(width: 16)
-                Text(title)
+                Text("Copy task")
             }
         }
-        .modifier(CopyButtonStyle(prominent: prominent))
+        .buttonStyle(.bordered)
         .help(help)
         .accessibilityValue(copied ? "Copied" : "")
-    }
-}
-
-private struct CopyButtonStyle: ViewModifier {
-    let prominent: Bool
-
-    func body(content: Content) -> some View {
-        if prominent {
-            content.buttonStyle(.borderedProminent)
-        } else {
-            content.buttonStyle(.bordered)
-        }
     }
 }
 
@@ -624,7 +612,7 @@ private struct SelectionHeader: View {
                 what
                 Spacer(minLength: 8)
                 if !place.pieces.isEmpty {
-                    CopyButton(model: model, id: place.id, title: "Agent task", prominent: true, help: "Copy a task for an agent") {
+                    CopyButton(model: model, id: place.id, help: "Copy a task for an agent to sort out only this") {
                         model.task(for: place) ?? ""
                     }
                 }

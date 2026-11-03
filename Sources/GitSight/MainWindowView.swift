@@ -15,6 +15,17 @@ struct MainWindowView: View {
                 NavigationSplitView {
                     RepositorySidebar(model: model)
                         .navigationSplitViewColumnWidth(min: 180, ideal: 210, max: 360)
+                        // In the sidebar's own toolbar, so the sidebar button keeps to the sidebar's edge
+                        // instead of sitting between the sidebar and the detail.
+                        .toolbar {
+                            ToolbarItem {
+                                Button(action: model.chooseRoot) {
+                                    Label(model.rootURL.map { RepositoryText.path($0) } ?? "Choose Folder", systemImage: "folder")
+                                        .labelStyle(.titleAndIcon)
+                                }
+                                .help("The folder to look for repositories in (⌘O)")
+                            }
+                        }
                 } detail: {
                     if let repository = model.selectedRepository {
                         RepositoryView(model: model, repository: repository)
@@ -30,13 +41,6 @@ struct MainWindowView: View {
             }
         }
         .toolbar {
-            ToolbarItem(placement: .navigation) {
-                Button(action: model.chooseRoot) {
-                    Label(model.rootURL.map { RepositoryText.path($0) } ?? "Choose Folder", systemImage: "folder")
-                        .labelStyle(.titleAndIcon)
-                }
-                .help("The folder to look for repositories in (⌘O)")
-            }
             ToolbarItem(placement: .primaryAction) {
                 if model.isScanning, !model.repositories.isEmpty {
                     ProgressView(value: model.scanProgress?.fractionCompleted ?? 0)
@@ -199,7 +203,8 @@ struct RepositorySidebar: View {
                 .textRole(.label)
                 .fontWeight(.semibold)
                 .foregroundStyle(.secondary)
-                .padding(.top, 12)
+                // Enough to set the group off, no more than the gap over Overview.
+                .padding(.top, 4)
                 .accessibilityAddTraits(.isHeader)
             ForEach(repositories, id: \.path) { repository in
                 RepositoryRow(repository: repository, now: now)

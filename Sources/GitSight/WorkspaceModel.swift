@@ -637,7 +637,7 @@ final class WorkspaceModel {
 
     // MARK: Agent tasks
 
-    /// What "Agent task" copies for a place, with the uncommitted files when they are on screen.
+    /// What a place's "Copy task" copies for a place, with the uncommitted files when they are on screen.
     func task(for place: WorkPlace) -> String? {
         guard let repository = selectedRepository else { return nil }
         let files = place.worktree.flatMap { openRow == .uncommitted($0.path) ? rowFiles : nil }
