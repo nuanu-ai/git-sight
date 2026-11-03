@@ -11,7 +11,7 @@ struct GitRunner {
     /// `config` goes through GIT_CONFIG_KEY_n and GIT_CONFIG_VALUE_n, which take any key as is,
     /// where `-c key=value` would split a key that contains "=".
     func run(in repositoryURL: URL, _ arguments: [String], config: [(key: String, value: String)] = []) throws -> GitResult {
-        let executable = "/usr/bin/git"
+        let executable = Self.executable
         // A signed commit would make git log run gpg.program, which the repository's config may point anywhere.
         let command = [
             executable, "--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null",
@@ -103,19 +103,52 @@ struct GitRunner {
             throw launchError(code)
         }
 
+        // The kernel wakes the loop when git writes or exits, so a call returns the moment git ends.
+        // Polling with a sleep added up to 10 ms to each of a scan's thousand calls.
+        let queue = kqueue()
+        guard queue >= 0 else {
+            let code = errno
+            Self.terminateAndWait(pid)
+            throw launchError(code)
+        }
+        defer { close(queue) }
+        var pipes = [Self.event(outputPipe.read, EVFILT_READ, EV_ADD), Self.event(errorPipe.read, EVFILT_READ, EV_ADD)]
+        var exit = Self.event(pid, EVFILT_PROC, EV_ADD | EV_ONESHOT, fflags: NOTE_EXIT)
+        // A process that exited before this cannot be watched; waitpid below finds it either way.
+        guard kevent(queue, &pipes, Int32(pipes.count), nil, 0, nil) == 0 else {
+            let code = errno
+            Self.terminateAndWait(pid)
+            throw launchError(code)
+        }
+        _ = kevent(queue, &exit, 1, nil, 0, nil)
+
         var output = Data()
         var errorOutput = Data()
         var status = Int32()
         var didCancel = false
         var didTimeOut = false
         let deadline = DispatchTime.now().uptimeNanoseconds + 60 * 1_000_000_000
+        var events = Array(repeating: Self.event(0, 0, 0), count: 3)
+        // The timeout only paces the cancellation and deadline checks.
+        var pace = timespec(tv_sec: 0, tv_nsec: 50_000_000)
         while true {
+            let count = kevent(queue, nil, 0, &events, Int32(events.count), &pace)
+            if count == -1, errno != EINTR {
+                let code = errno
+                Self.terminateAndWait(pid)
+                throw launchError(code)
+            }
             do {
                 try Self.readAvailable(outputPipe.read, into: &output)
                 try Self.readAvailable(errorPipe.read, into: &errorOutput)
             } catch {
                 Self.terminateAndWait(pid)
                 throw error
+            }
+            // A pipe at its end stays readable; unwatched, it cannot wake the loop again and again.
+            for event in events.prefix(Int(max(count, 0))) where event.filter == Int16(EVFILT_READ) && event.flags & UInt16(EV_EOF) != 0 {
+                var unwatch = Self.event(Int32(event.ident), EVFILT_READ, EV_DELETE)
+                _ = kevent(queue, &unwatch, 1, nil, 0, nil)
             }
             if Task.isCancelled {
                 didCancel = true
@@ -135,7 +168,6 @@ struct GitRunner {
                 Self.terminateAndWait(pid)
                 throw launchError(code)
             }
-            usleep(10_000)
         }
         if didCancel || didTimeOut { Self.waitForExit(pid, &status) }
         try Self.readAvailable(outputPipe.read, into: &output)
@@ -153,6 +185,26 @@ struct GitRunner {
             standardOutput: output,
             standardError: String(decoding: errorOutput, as: UTF8.self)
         )
+    }
+
+    /// /usr/bin/git is xcrun's shim: it looks up the developer folder anew on every call,
+    /// which doubled the cost of each of a scan's thousand calls. Looked up once instead.
+    private static let executable: String = {
+        let xcrun = Process()
+        let pipe = Pipe()
+        xcrun.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
+        xcrun.arguments = ["--find", "git"]
+        xcrun.standardOutput = pipe
+        xcrun.standardError = FileHandle.nullDevice
+        guard (try? xcrun.run()) != nil else { return "/usr/bin/git" }
+        let path = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        xcrun.waitUntilExit()
+        return xcrun.terminationStatus == 0 && FileManager.default.isExecutableFile(atPath: path) ? path : "/usr/bin/git"
+    }()
+
+    private static func event(_ identifier: Int32, _ filter: Int32, _ flags: Int32, fflags: UInt32 = 0) -> kevent {
+        kevent(ident: UInt(identifier), filter: Int16(filter), flags: UInt16(flags), fflags: fflags, data: 0, udata: nil)
     }
 
     private static func makePipe() throws -> (read: Int32, write: Int32) {
