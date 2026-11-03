@@ -15,17 +15,6 @@ struct MainWindowView: View {
                 NavigationSplitView {
                     RepositorySidebar(model: model)
                         .navigationSplitViewColumnWidth(min: 180, ideal: 210, max: 360)
-                        // In the sidebar's own toolbar, so the sidebar button keeps to the sidebar's edge
-                        // instead of sitting between the sidebar and the detail.
-                        .toolbar {
-                            ToolbarItem {
-                                Button(action: model.chooseRoot) {
-                                    Label(model.rootURL.map { RepositoryText.path($0) } ?? "Choose Folder", systemImage: "folder")
-                                        .labelStyle(.titleAndIcon)
-                                }
-                                .help("The folder to look for repositories in (⌘O)")
-                            }
-                        }
                 } detail: {
                     if let repository = model.selectedRepository {
                         RepositoryView(model: model, repository: repository)
@@ -274,8 +263,15 @@ private struct SidebarFooter: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            if let lastScanDate = model.lastScanDate {
-                Text("Updated \(lastScanDate.formatted(date: .omitted, time: .shortened))")
+            // Here, not in the toolbar: it is set once, and a long path has room to shrink in the middle.
+            if let rootURL = model.rootURL {
+                Button(action: model.chooseRoot) {
+                    Label(RepositoryText.path(rootURL), systemImage: "folder")
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                .buttonStyle(.borderless)
+                .help("The folder to look for repositories in. Click to choose another (⌘O)")
             }
             if let errorMessage = model.errorMessage {
                 // The list above is from the last scan that worked.
@@ -306,6 +302,10 @@ private struct SidebarFooter: View {
                     }
                     .frame(width: 420, height: 260)
                 }
+            }
+            if let lastScanDate = model.lastScanDate {
+                Text("Updated \(lastScanDate.formatted(date: .omitted, time: .shortened))")
+                    .fixedSize()
             }
         }
         .textRole(.secondary)
