@@ -302,8 +302,11 @@ enum CommitTopologyIntegrationTests {
         try runGit(in: repositoryURL, ["tag", "v1.0"])
         try runGit(in: repositoryURL, ["remote", "add", "origin", originURL.path])
         try runGit(in: repositoryURL, ["push", "-u", "origin", "main"])
+        try runGit(in: repositoryURL, ["remote", "set-head", "origin", "main"])
         try runGit(in: repositoryURL, ["checkout", "-b", "feature"])
         try runGit(in: repositoryURL, ["commit", "--allow-empty", "-m", "Feature"])
+        try "draft\n".write(to: repositoryURL.appendingPathComponent("draft.txt"), atomically: true, encoding: .utf8)
+        try runGit(in: repositoryURL, ["stash", "push", "--include-untracked", "-m", "parked"])
         // A branch named like a remote's branch is still a local branch.
         try runGit(in: repositoryURL, ["branch", "origin/look-alike", "main"])
 
@@ -319,6 +322,7 @@ enum CommitTopologyIntegrationTests {
             ],
             "local branches, remote branches and tags are told apart by their full names"
         )
+        try expectEqual(history.first { $0.subject == "On feature: parked" }?.refs, [], "a stash is not a branch")
 
         try runGit(in: repositoryURL, ["checkout", "--detach", "main"])
         let detached = try RepositoryInspector().history(in: repositoryURL, revisions: ["--all"])

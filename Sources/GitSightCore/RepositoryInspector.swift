@@ -97,7 +97,7 @@ public struct RepositoryInspector {
         let limit = 300
         // "--" keeps a file named like a revision, e.g. HEAD, from making git log ambiguous.
         let output = try git.output(in: repositoryURL, [
-            "log", "--topo-order", "--boundary", "-n", String(limit), "--date=iso-strict", "--pretty=format:\(format)"
+            "log", "--topo-order", "--boundary", "--decorate=full", "-n", String(limit), "--date=iso-strict", "--pretty=format:\(format)"
         ] + revisions + ["--"])
         var commits = try Self.records(output).map { record in
             let fields = Self.fields(record)
@@ -121,8 +121,24 @@ public struct RepositoryInspector {
         return Self.laidOut(commits)
     }
 
+    /// Reads %D written with --decorate=full, e.g. "HEAD -> refs/heads/main, refs/remotes/origin/main, tag: refs/tags/v1".
     static func refs(_ decoration: String) -> [CommitRef] {
-        []
+        decoration.split(separator: ",").compactMap { part in
+            var name = part.trimmingCharacters(in: .whitespaces)
+            let isHead = name.hasPrefix("HEAD -> ")
+            if isHead { name.removeFirst("HEAD -> ".count) }
+            if name.hasPrefix("tag: ") { name.removeFirst("tag: ".count) }
+            if name == "HEAD" { return CommitRef(kind: .head, name: name, isHead: true) }
+            for (prefix, kind) in [("refs/heads/", CommitRef.Kind.branch), ("refs/remotes/", .remoteBranch), ("refs/tags/", .tag)]
+            where name.hasPrefix(prefix) {
+                let short = String(name.dropFirst(prefix.count))
+                // origin/HEAD only repeats which branch the server calls default.
+                if kind == .remoteBranch, short.hasSuffix("/HEAD") { return nil }
+                return CommitRef(kind: kind, name: short, isHead: isHead)
+            }
+            // Other refs, such as refs/stash, are not branches.
+            return nil
+        }
     }
 
     private func nameStatus(in repositoryURL: URL, _ arguments: [String]) throws -> [CommitFileSnapshot] {
