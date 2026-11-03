@@ -1,6 +1,7 @@
 import AppKit
 import GitSightCore
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct MainWindowView: View {
     @Bindable var model: WorkspaceModel
@@ -129,7 +130,8 @@ private struct WorkspaceStateView: View {
 
 private struct RepositorySidebar: View {
     @Bindable var model: WorkspaceModel
-    @AppStorage("showsCleanRepositories") private var showsClean = false
+    /// Sections the user folded, by key; "Чисто" starts folded.
+    @AppStorage("collapsedSidebarSections") private var collapsed = "clean"
 
     /// Changes newer than this put a repository under "Сейчас".
     private static let activeWindow: TimeInterval = 15 * 60
@@ -150,6 +152,20 @@ private struct RepositorySidebar: View {
         }
     }
 
+    private func isExpanded(_ key: String) -> Bool {
+        !collapsed.split(separator: ",").contains(Substring(key))
+    }
+
+    private func expansion(_ key: String) -> Binding<Bool> {
+        Binding {
+            isExpanded(key)
+        } set: { expanded in
+            var keys = Set(collapsed.split(separator: ",").map(String.init))
+            if expanded { keys.remove(key) } else { keys.insert(key) }
+            collapsed = keys.sorted().joined(separator: ",")
+        }
+    }
+
     private func list(now: Date) -> some View {
         let all = model.filteredRepositories
         let active = all
@@ -161,33 +177,28 @@ private struct RepositorySidebar: View {
         return List(selection: $model.selectedPath) {
             if !active.isEmpty {
                 Section {
-                    ForEach(active, id: \.0.path) { repository, change in
-                        RepositoryRow(repository: repository, activity: change)
+                    if isExpanded("now") {
+                        ForEach(active, id: \.0.path) { repository, change in
+                            RepositoryRow(repository: repository, activity: change)
+                        }
                     }
                 } header: {
-                    ActivityHeader(count: active.count)
+                    SidebarHeader(title: "Сейчас", icon: "dot.radiowaves.left.and.right", color: .accentColor, count: active.count, isExpanded: expansion("now"))
                 }
             }
-            ForEach([Severity.critical, .warning, .attention], id: \.self) { severity in
+            ForEach([Severity.critical, .warning, .attention, .clean], id: \.self) { severity in
                 let group = repositories.filter { $0.severity == severity }
+                let key = "\(severity)"
                 if !group.isEmpty {
                     Section {
-                        ForEach(group, id: \.path) { repository in
-                            RepositoryRow(repository: repository)
+                        if isExpanded(key) {
+                            ForEach(group, id: \.path) { repository in
+                                RepositoryRow(repository: repository)
+                            }
                         }
                     } header: {
-                        SeverityHeader(severity: severity, count: group.count)
+                        SidebarHeader(title: severity.title, icon: nil, color: severity.color, count: group.count, isExpanded: expansion(key))
                     }
-                }
-            }
-            let clean = repositories.filter { $0.severity == .clean }
-            if !clean.isEmpty {
-                Section(isExpanded: $showsClean) {
-                    ForEach(clean, id: \.path) { repository in
-                        RepositoryRow(repository: repository)
-                    }
-                } header: {
-                    SeverityHeader(severity: .clean, count: clean.count)
                 }
             }
         }
@@ -307,41 +318,53 @@ private struct SeverityBadge: View {
     }
 }
 
-private struct ActivityHeader: View {
+
+
+/// A tinted band that folds its section, so groups read apart from the repositories in them.
+private struct SidebarHeader: View {
+    let title: String
+    /// A symbol, or nil for a dot in the group's color.
+    let icon: String?
+    let color: Color
     let count: Int
+    @Binding var isExpanded: Bool
 
     var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "dot.radiowaves.left.and.right")
-                .foregroundStyle(Color.accentColor)
-            Text("Сейчас")
-                .font(.headline)
-                .foregroundStyle(.primary)
-            Text("\(count)")
-                .font(.headline)
-                .foregroundStyle(.secondary)
+        Button {
+            withAnimation(.snappy(duration: 0.2)) { isExpanded.toggle() }
+        } label: {
+            HStack(spacing: 7) {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                    .frame(width: 10)
+                if let icon {
+                    Image(systemName: icon)
+                        .foregroundStyle(color)
+                } else {
+                    Circle()
+                        .fill(color)
+                        .frame(width: 9, height: 9)
+                }
+                Text(title)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                Spacer(minLength: 4)
+                Text("\(count)")
+                    .font(.subheadline.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(RoundedRectangle(cornerRadius: 6).fill(color.opacity(0.13)))
+            .contentShape(Rectangle())
         }
-        .accessibilityElement(children: .combine)
-    }
-}
-
-private struct SeverityHeader: View {
-    let severity: Severity
-    let count: Int
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Circle()
-                .fill(severity.color)
-                .frame(width: 9, height: 9)
-            Text(severity.title)
-                .font(.headline)
-                .foregroundStyle(.primary)
-            Text("\(count)")
-                .font(.headline)
-                .foregroundStyle(.secondary)
-        }
-        .accessibilityElement(children: .combine)
+        .buttonStyle(.plain)
+        .padding(.top, 4)
+        .accessibilityLabel("\(title), \(count)")
+        .accessibilityValue(isExpanded ? "развёрнуто" : "свёрнуто")
     }
 }
 
@@ -447,19 +470,14 @@ private struct FindingDetail: View {
         } else {
             switch model.findingContent {
             case .history(let commits):
-                VSplitView {
-                    CommitGraph(
-                        commits: commits,
-                        // A detached HEAD's range also stops at local branches and tags.
-                        boundaryLabel: model.selectedFinding?.kind == .detached ? "Уже в ветке или на сервере" : "На сервере",
-                        selection: $model.selectedCommitHash
-                    )
-                        .frame(minHeight: 160)
-                    if let commit = commits.first(where: { $0.fullHash == model.selectedCommitHash }) {
-                        CommitFilesPane(commit: commit, files: model.commitFiles, error: model.commitFilesError)
-                            .frame(minHeight: 120, idealHeight: 220)
-                    }
-                }
+                CommitGraph(
+                    commits: commits,
+                    // A detached HEAD's range also stops at local branches and tags.
+                    boundaryLabel: model.selectedFinding?.kind == .detached ? "Уже в ветке или на сервере" : "На сервере",
+                    selection: $model.selectedCommitHash,
+                    files: model.commitFiles,
+                    filesError: model.commitFilesError
+                )
             case .files(let files):
                 FileList(files: files)
             case nil:
@@ -571,32 +589,43 @@ private struct FileList: View {
     }
 }
 
-private struct FileRow: View {
+/// A changed file as VS Code lists it: icon, name, folder, and the status letter on the right.
+struct FileRow: View {
     let file: CommitFileSnapshot
 
     var body: some View {
         let path = file.path as NSString
-        HStack(spacing: 8) {
-            Text(file.status)
-                .font(.body.monospaced().weight(.semibold))
-                .foregroundStyle(statusColor)
-                .frame(width: 14)
-                .help(statusName)
+        HStack(spacing: 6) {
+            Image(nsImage: NSWorkspace.shared.icon(for: UTType(filenameExtension: path.pathExtension) ?? .data))
+                .resizable()
+                .frame(width: 16, height: 16)
+                .accessibilityHidden(true)
             Text(path.lastPathComponent)
+                .strikethrough(letter == "D")
                 .lineLimit(1)
+                .layoutPriority(1)
             Text(path.deletingLastPathComponent)
-                .font(.body)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
-            Spacer(minLength: 0)
+            Spacer(minLength: 8)
+            Text(letter)
+                .font(.body.monospaced().weight(.semibold))
+                .foregroundStyle(statusColor)
+                .help(statusName)
         }
         .help(file.path)
     }
 
+    /// git's status letter, with untracked shown as U like VS Code.
+    private var letter: String {
+        let letter = String(file.status.prefix(1))
+        return letter == "?" ? "U" : letter
+    }
+
     private var statusColor: Color {
-        switch file.status.prefix(1) {
-        case "A", "?": return .green
+        switch letter {
+        case "A", "U": return .green
         case "D": return .red
         case "R", "C": return .blue
         default: return .orange
@@ -604,49 +633,13 @@ private struct FileRow: View {
     }
 
     private var statusName: String {
-        switch file.status.prefix(1) {
+        switch letter {
         case "A": return "Добавлен"
-        case "?": return "Новый, не добавлен в git"
+        case "U": return "Новый, не добавлен в git"
         case "D": return "Удалён"
         case "R": return "Переименован"
+        case "C": return "Скопирован"
         default: return "Изменён"
-        }
-    }
-}
-
-private struct CommitFilesPane: View {
-    let commit: CommitSnapshot
-    let files: [CommitFileSnapshot]?
-    let error: String?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
-                Text(commit.shortHash)
-                    .font(.body.monospaced())
-                    .textSelection(.enabled)
-                Text("\(commit.author) · \(RepositoryText.fullDate(commit.date))")
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                Spacer()
-                if let files {
-                    Text(RepositoryText.files(files.count))
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .font(.body)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            Divider()
-            if let error {
-                ContentUnavailableView("Не удалось прочитать файлы", systemImage: "exclamationmark.triangle", description: Text(error))
-            } else if let files {
-                FileList(files: files)
-            } else {
-                ProgressView()
-                    .controlSize(.small)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
         }
     }
 }

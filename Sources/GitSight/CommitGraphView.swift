@@ -1,114 +1,174 @@
 import GitSightCore
 import SwiftUI
 
-/// Commits on fixed-height rows, so rails are drawn from row indices and never drift from the text.
+/// Commits on fixed-height rows, drawn the way VS Code's Source Control graph draws them.
+/// Clicking a commit opens its files right under it, and the lanes run on through them.
 struct CommitGraph: View {
     let commits: [CommitSnapshot]
     /// What the commits the range stops at have in common, e.g. "На сервере".
     let boundaryLabel: String
     @Binding var selection: String?
+    /// Files of the selected commit; nil while they load.
+    let files: [CommitFileSnapshot]?
+    let filesError: String?
 
-    private static let rowHeight: CGFloat = 36
-    private static let laneSpacing: CGFloat = 16
-    private static let laneColors: [Color] = [.blue, .orange, .purple, .green, .pink, .teal]
+    private static let rowHeight: CGFloat = 24
+    private static let laneSpacing: CGFloat = 12
+    /// Radius of the turn where a line leaves or joins a row.
+    private static let turn: CGFloat = 5
+    // VS Code's graph palette: the first lane blue like the current branch, then scmGraph.foreground1–5.
+    private static let laneColors: [Color] = [
+        Color(red: 0.0, green: 0.48, blue: 0.8),
+        Color(red: 1.0, green: 0.69, blue: 0.0),
+        Color(red: 0.86, green: 0.15, blue: 0.5),
+        Color(red: 0.25, green: 0.69, blue: 0.65),
+        Color(red: 0.71, green: 0.43, blue: 1.0),
+        Color(red: 0.6, green: 0.31, blue: 0.0)
+    ]
+
+    private enum Row {
+        case commit(Int)
+        case file(CommitFileSnapshot)
+        /// Loading (nil) or a message in place of the files.
+        case note(String?)
+    }
+
+    private var rows: [(id: String, row: Row)] {
+        var rows: [(id: String, row: Row)] = []
+        for (index, commit) in commits.enumerated() {
+            rows.append((commit.fullHash, .commit(index)))
+            guard commit.fullHash == selection else { continue }
+            if let filesError {
+                rows.append(("\(commit.fullHash)|error", .note(filesError)))
+            } else if let files {
+                if files.isEmpty { rows.append(("\(commit.fullHash)|empty", .note("Файлы не менялись"))) }
+                rows += files.map { ("\(commit.fullHash)|\($0.path)", .file($0)) }
+            } else {
+                rows.append(("\(commit.fullHash)|loading", .note(nil)))
+            }
+        }
+        return rows
+    }
 
     private var railWidth: CGFloat {
-        Self.laneX(commits.map(\.lane).max() ?? 0) + 14
+        Self.laneX(commits.map(\.lane).max() ?? 0) + 12
     }
 
     var body: some View {
+        let rows = rows
         ScrollView {
             ZStack(alignment: .topLeading) {
-                rails
-                    .frame(width: railWidth, height: Self.rowHeight * CGFloat(commits.count))
+                rails(rows: rows)
+                    .frame(width: railWidth, height: Self.rowHeight * CGFloat(rows.count))
                 LazyVStack(spacing: 0) {
-                    ForEach(commits, id: \.fullHash) { commit in
-                        CommitRow(commit: commit, boundaryLabel: boundaryLabel, isSelected: selection == commit.fullHash)
-                            .padding(.leading, railWidth)
+                    ForEach(rows, id: \.id) { item in
+                        row(item.row)
                             .frame(height: Self.rowHeight)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                guard !commit.isBoundary else { return }
-                                selection = selection == commit.fullHash ? nil : commit.fullHash
-                            }
                     }
                 }
             }
-            .padding(.vertical, 6)
+            .padding(.vertical, 4)
         }
     }
 
-    private var rails: some View {
+    @ViewBuilder
+    private func row(_ row: Row) -> some View {
+        switch row {
+        case .commit(let index):
+            let commit = commits[index]
+            CommitRow(commit: commit, boundaryLabel: boundaryLabel, laneColor: color(lane: commit.lane), isSelected: selection == commit.fullHash)
+                .padding(.leading, railWidth)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    guard !commit.isBoundary else { return }
+                    selection = selection == commit.fullHash ? nil : commit.fullHash
+                }
+        case .file(let file):
+            FileRow(file: file)
+                .padding(.leading, railWidth + 22)
+                .padding(.trailing, 16)
+        case .note(let text):
+            HStack {
+                if let text {
+                    Text(text).foregroundStyle(.secondary).lineLimit(1)
+                } else {
+                    ProgressView().controlSize(.small)
+                }
+                Spacer()
+            }
+            .padding(.leading, railWidth + 22)
+        }
+    }
+
+    private func rails(rows: [(id: String, row: Row)]) -> some View {
         Canvas { context, size in
-            let rows = Dictionary(uniqueKeysWithValues: commits.enumerated().map { ($0.element.fullHash, $0.offset) })
-            for (row, commit) in commits.enumerated() where !commit.isBoundary {
-                let start = point(row: row, lane: commit.lane)
+            var y: [String: CGFloat] = [:]
+            for (index, item) in rows.enumerated() {
+                if case .commit(let commit) = item.row {
+                    y[commits[commit].fullHash] = (CGFloat(index) + 0.5) * Self.rowHeight
+                }
+            }
+            for commit in commits where !commit.isBoundary {
+                guard let childY = y[commit.fullHash] else { continue }
+                let start = CGPoint(x: Self.laneX(commit.lane), y: childY)
                 for (offset, parentHash) in commit.parents.enumerated() {
                     // The core holds this lane for the parent until the parent's row, so nothing else sits on it.
                     let lane = offset < commit.parentLanes.count ? commit.parentLanes[offset] : commit.lane
-                    let x = Self.laneX(lane)
-                    var path = Path()
-                    path.move(to: start)
-                    if let parentRow = rows[parentHash] {
-                        let end = point(row: parentRow, lane: commits[parentRow].lane)
-                        if end.y - start.y <= Self.rowHeight {
-                            Self.bend(&path, from: start, to: end)
-                        } else {
-                            // Into the held lane below the child, down it, into the parent's lane above the parent.
-                            var current = start
-                            if x != start.x {
-                                current = CGPoint(x: x, y: start.y + Self.rowHeight)
-                                Self.bend(&path, from: start, to: current)
-                            }
-                            let join = CGPoint(x: x, y: end.y - Self.rowHeight)
-                            if join.y > current.y { path.addLine(to: join) }
-                            if x != end.x {
-                                Self.bend(&path, from: join, to: end)
-                            } else {
-                                path.addLine(to: end)
-                            }
-                        }
-                    } else {
-                        // The parent is past the history limit: the line runs off the bottom in its lane.
-                        var current = start
-                        if x != start.x {
-                            current = CGPoint(x: x, y: start.y + Self.rowHeight)
-                            Self.bend(&path, from: start, to: current)
-                        }
-                        path.addLine(to: CGPoint(x: x, y: size.height))
+                    let parent = commits.first { $0.fullHash == parentHash }.flatMap { parent in
+                        y[parentHash].map { CGPoint(x: Self.laneX(parent.lane), y: $0) }
                     }
-                    context.stroke(path, with: .color(color(lane: lane).opacity(0.7)), lineWidth: 1.5)
+                    let path = Self.edge(from: start, along: Self.laneX(lane), to: parent, bottom: size.height)
+                    context.stroke(path, with: .color(color(lane: lane)), lineWidth: 1.5)
                 }
             }
-            for (row, commit) in commits.enumerated() {
-                let center = point(row: row, lane: commit.lane)
-                let dot = Path(ellipseIn: CGRect(x: center.x - 5, y: center.y - 5, width: 10, height: 10))
+            for commit in commits {
+                guard let centerY = y[commit.fullHash] else { continue }
+                let center = CGPoint(x: Self.laneX(commit.lane), y: centerY)
+                let color = color(lane: commit.lane)
                 if commit.isBoundary {
-                    context.stroke(dot, with: .color(.secondary), lineWidth: 1.5)
+                    context.stroke(Self.circle(center, 4), with: .color(.secondary), lineWidth: 1.5)
+                } else if commit.parents.count > 1 {
+                    // A merge: a ring with a dot, as in VS Code.
+                    context.stroke(Self.circle(center, 4.5), with: .color(color), lineWidth: 1.5)
+                    context.fill(Self.circle(center, 2), with: .color(color))
                 } else {
-                    context.fill(dot, with: .color(color(lane: commit.lane)))
+                    context.fill(Self.circle(center, 4), with: .color(color))
                 }
             }
         }
         .accessibilityHidden(true)
     }
 
-    /// An S-curve between two lanes that leaves and arrives vertically.
-    private static func bend(_ path: inout Path, from start: CGPoint, to end: CGPoint) {
-        let height = end.y - start.y
-        path.addCurve(
-            to: end,
-            control1: CGPoint(x: start.x, y: start.y + height * 0.6),
-            control2: CGPoint(x: end.x, y: end.y - height * 0.6)
-        )
+    /// A line from a commit to its parent: across the child's row to the held lane, down it,
+    /// and across the parent's row into the parent, turning with a small radius like VS Code.
+    private static func edge(from start: CGPoint, along x: CGFloat, to end: CGPoint?, bottom: CGFloat) -> Path {
+        var path = Path()
+        path.move(to: start)
+        if x != start.x {
+            let direction: CGFloat = x > start.x ? 1 : -1
+            path.addLine(to: CGPoint(x: x - direction * turn, y: start.y))
+            path.addQuadCurve(to: CGPoint(x: x, y: start.y + turn), control: CGPoint(x: x, y: start.y))
+        }
+        guard let end else {
+            // The parent is past the history limit: the line runs off the bottom in its lane.
+            path.addLine(to: CGPoint(x: x, y: bottom))
+            return path
+        }
+        if x != end.x {
+            let direction: CGFloat = end.x > x ? 1 : -1
+            path.addLine(to: CGPoint(x: x, y: end.y - turn))
+            path.addQuadCurve(to: CGPoint(x: x + direction * turn, y: end.y), control: CGPoint(x: x, y: end.y))
+        }
+        path.addLine(to: end)
+        return path
     }
 
-    private func point(row: Int, lane: Int) -> CGPoint {
-        CGPoint(x: Self.laneX(lane), y: (CGFloat(row) + 0.5) * Self.rowHeight)
+    private static func circle(_ center: CGPoint, _ radius: CGFloat) -> Path {
+        Path(ellipseIn: CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2))
     }
 
     private static func laneX(_ lane: Int) -> CGFloat {
-        14 + CGFloat(max(0, lane)) * laneSpacing
+        12 + CGFloat(max(0, lane)) * laneSpacing
     }
 
     private func color(lane: Int) -> Color {
@@ -119,32 +179,80 @@ struct CommitGraph: View {
 private struct CommitRow: View {
     let commit: CommitSnapshot
     let boundaryLabel: String
+    let laneColor: Color
     let isSelected: Bool
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 6) {
+            if !commit.isBoundary {
+                Image(systemName: isSelected ? "chevron.down" : "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 12)
+            }
             Text(commit.isBoundary ? "\(boundaryLabel): \(commit.subject)" : commit.subject)
                 .foregroundStyle(commit.isBoundary ? .secondary : .primary)
                 .lineLimit(1)
                 .truncationMode(.tail)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Text(commit.shortHash)
-                .font(.body.monospaced())
-                .foregroundStyle(.secondary)
+                .layoutPriority(1)
+            ForEach(commit.refs, id: \.self) { ref in
+                RefBadge(ref: ref, color: laneColor)
+            }
+            Spacer(minLength: 8)
             Text(RepositoryText.age(commit.date, short: true))
-                .font(.body)
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
-                .frame(minWidth: 60, alignment: .trailing)
+                .fixedSize()
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, 6)
         .frame(maxHeight: .infinity)
         .background(
-            RoundedRectangle(cornerRadius: 5)
+            RoundedRectangle(cornerRadius: 4)
                 .fill(isSelected ? Color.accentColor.opacity(0.18) : .clear)
-                .padding(.vertical, 1)
         )
         .padding(.trailing, 8)
         .help("\(commit.subject)\n\(commit.shortHash) · \(commit.author) · \(RepositoryText.fullDate(commit.date))")
+    }
+}
+
+/// A branch or tag name on its commit, like VS Code's history item labels.
+private struct RefBadge: View {
+    let ref: CommitRef
+    let color: Color
+
+    var body: some View {
+        // Local branches take the lane's color; what lives elsewhere stays grey.
+        let isLocal = ref.kind == .branch || ref.kind == .head
+        HStack(spacing: 3) {
+            Image(systemName: icon)
+                .font(.caption2.weight(.semibold))
+            Text(ref.name)
+                .font(.caption.weight(ref.isHead ? .bold : .medium))
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 5)
+        .padding(.vertical, 1)
+        .foregroundStyle(isLocal ? Color.white : Color.secondary)
+        .background(Capsule().fill(isLocal ? color : Color.secondary.opacity(0.18)))
+        .fixedSize()
+        .help(help)
+    }
+
+    private var icon: String {
+        switch ref.kind {
+        case .branch: return "arrow.triangle.branch"
+        case .remoteBranch: return "cloud"
+        case .tag: return "tag"
+        case .head: return "smallcircle.filled.circle"
+        }
+    }
+
+    private var help: String {
+        switch ref.kind {
+        case .branch: return ref.isHead ? "Ветка \(ref.name), текущая" : "Ветка \(ref.name)"
+        case .remoteBranch: return "\(ref.name) на сервере"
+        case .tag: return "Тег \(ref.name)"
+        case .head: return "HEAD без ветки"
+        }
     }
 }
