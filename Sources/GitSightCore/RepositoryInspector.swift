@@ -123,7 +123,21 @@ public struct RepositoryInspector {
 
     /// The whole history behind `tips`, with commits that no remote branch holds marked.
     public func history(of tips: [String], in repositoryURL: URL) throws -> [CommitSnapshot] {
-        []
+        try marked(history(in: repositoryURL, revisions: tips), tips: tips, in: repositoryURL)
+    }
+
+    /// Marks the commits reachable from `tips` that no remote branch holds.
+    private func marked(_ history: [CommitSnapshot], tips: [String], in repositoryURL: URL) throws -> [CommitSnapshot] {
+        // Without a remote nothing could be pushed, so marking every commit would say nothing.
+        guard try !git.output(in: repositoryURL, ["remote"]).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return history
+        }
+        let unpushed = Set(try git.output(in: repositoryURL, ["rev-list"] + tips + ["--not", "--remotes", "--"]).split(separator: "\n").map(String.init))
+        var commits = history
+        for index in commits.indices where unpushed.contains(commits[index].fullHash) {
+            commits[index].isUnpushed = true
+        }
+        return commits
     }
 
     /// Every branch, remote branch and tag, and linked worktrees on no branch, as one graph.
@@ -138,19 +152,11 @@ public struct RepositoryInspector {
         // An orphan branch with no commits yet leaves HEAD pointing nowhere, and naming it would fail the log.
         let head = try git.optionalOutput(in: repositoryURL, ["rev-parse", "--verify", "--quiet", "HEAD"]) == nil ? [] : ["HEAD"]
         let tips = ["--branches"] + head + detached.map(\.head)
-        var commits = try history(in: repositoryURL, revisions: tips + ["--remotes", "--tags"])
+        var commits = try marked(history(in: repositoryURL, revisions: tips + ["--remotes", "--tags"]), tips: tips, in: repositoryURL)
         for (name, head) in detached {
             if let index = commits.firstIndex(where: { $0.fullHash == head }) {
                 commits[index].refs.append(CommitRef(kind: .worktree, name: name))
             }
-        }
-        // Without a remote nothing could be pushed, so marking every commit would say nothing.
-        guard try !git.output(in: repositoryURL, ["remote"]).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return commits
-        }
-        let unpushed = Set(try git.output(in: repositoryURL, ["rev-list"] + tips + ["--not", "--remotes", "--"]).split(separator: "\n").map(String.init))
-        for index in commits.indices where unpushed.contains(commits[index].fullHash) {
-            commits[index].isUnpushed = true
         }
         return commits
     }
