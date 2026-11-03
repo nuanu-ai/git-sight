@@ -262,56 +262,94 @@ private struct SidebarFooter: View {
     @Bindable var model: WorkspaceModel
 
     var body: some View {
-        HStack(spacing: 8) {
-            // Here, not in the toolbar: it is set once, and a long path has room to shrink in the middle.
-            if let rootURL = model.rootURL {
-                Button(action: model.chooseRoot) {
-                    Label(RepositoryText.path(rootURL), systemImage: "folder")
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-                .buttonStyle(.borderless)
-                .help("The folder to look for repositories in. Click to choose another (⌘O)")
+        // One line while everything fits. Then the folder gets a line of its own, shrinking in the middle,
+        // and then the time too, so nothing wraps mid-word.
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                folder
+                Spacer(minLength: 8)
+                problems
+                updated
             }
-            if let errorMessage = model.errorMessage {
-                // The list above is from the last scan that worked.
-                Label("Couldn't refresh", systemImage: "exclamationmark.triangle")
-                    .foregroundStyle(.orange)
-                    .help(errorMessage)
-            }
-            Spacer()
-            if !model.scanFailures.isEmpty {
-                Button {
-                    model.showsScanFailures.toggle()
-                } label: {
-                    Label("Couldn't read \(model.scanFailures.count)", systemImage: "exclamationmark.triangle")
-                }
-                .buttonStyle(.borderless)
-                .popover(isPresented: $model.showsScanFailures) {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 12) {
-                            ForEach(model.scanFailures, id: \.path) { failure in
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(RepositoryText.path(failure.path)).fontWeight(.medium)
-                                    Text(failure.message).textRole(.secondary).foregroundStyle(.secondary)
-                                }
-                                .textSelection(.enabled)
-                            }
-                        }
-                        .padding(16)
+            VStack(alignment: .leading, spacing: 4) {
+                folder
+                // Measured on its own: the folder's full length must not push the time onto a third line.
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 12) {
+                        problems
+                        updated
                     }
-                    .frame(width: 420, height: 260)
+                    VStack(alignment: .leading, spacing: 4) {
+                        problems
+                        updated
+                    }
                 }
             }
-            if let lastScanDate = model.lastScanDate {
-                Text("Updated \(lastScanDate.formatted(date: .omitted, time: .shortened))")
-                    .fixedSize()
-            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .textRole(.secondary)
         .foregroundStyle(.secondary)
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+        .popover(isPresented: $model.showsScanFailures) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(model.scanFailures, id: \.path) { failure in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(RepositoryText.path(failure.path)).fontWeight(.medium)
+                            Text(failure.message).textRole(.secondary).foregroundStyle(.secondary)
+                        }
+                        .textSelection(.enabled)
+                    }
+                }
+                .padding(16)
+            }
+            .frame(width: 420, height: 260)
+        }
+    }
+
+    /// Here, not in the toolbar: it is set once, and a long path has room to shrink in the middle.
+    @ViewBuilder
+    private var folder: some View {
+        if let rootURL = model.rootURL {
+            Button(action: model.chooseRoot) {
+                Label(RepositoryText.path(rootURL), systemImage: "folder")
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .buttonStyle(.borderless)
+            .help("The folder to look for repositories in. Click to choose another (⌘O)")
+        }
+    }
+
+    /// What went wrong in the last scan; each keeps to one line.
+    @ViewBuilder
+    private var problems: some View {
+        if let errorMessage = model.errorMessage {
+            // The list above is from the last scan that worked.
+            Label("Couldn't refresh", systemImage: "exclamationmark.triangle")
+                .foregroundStyle(.orange)
+                .fixedSize()
+                .help(errorMessage)
+        }
+        if !model.scanFailures.isEmpty {
+            Button {
+                model.showsScanFailures.toggle()
+            } label: {
+                Label("Couldn't read \(model.scanFailures.count)", systemImage: "exclamationmark.triangle")
+            }
+            .buttonStyle(.borderless)
+            .fixedSize()
+            .help("Repositories that couldn't be read. Click for the reasons")
+        }
+    }
+
+    @ViewBuilder
+    private var updated: some View {
+        if let lastScanDate = model.lastScanDate {
+            Text("Updated \(lastScanDate.formatted(date: .omitted, time: .shortened))")
+                .fixedSize()
+        }
     }
 }
 
