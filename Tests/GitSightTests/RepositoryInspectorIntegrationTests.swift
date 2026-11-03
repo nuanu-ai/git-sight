@@ -129,7 +129,8 @@ enum RepositoryInspectorIntegrationTests {
             ("watcher reports a worktree outside the folder as its repository", RepositoryWatcherIntegrationTests.testReportsAWorktreeOutsideTheFolderAsItsRepository),
             ("latest change follows the newest work", RecentChangeIntegrationTests.testLatestChangeFollowsTheNewestWork),
             ("watcher ignores files git ignores", RepositoryWatcherIntegrationTests.testIgnoredFilesAreNotChanges),
-            ("watcher reports a repository in the temporary folder", RepositoryWatcherIntegrationTests.testReportsARepositoryInTheTemporaryFolder)
+            ("watcher reports a repository in the temporary folder", RepositoryWatcherIntegrationTests.testReportsARepositoryInTheTemporaryFolder),
+            ("stashes know their branch and commit", WorkPlaceIntegrationTests.testStashesKnowTheirBranchAndCommit)
         ] {
             await run(name: name, test, failures: &failures)
         }

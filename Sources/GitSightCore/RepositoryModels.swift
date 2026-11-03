@@ -25,6 +25,8 @@ public struct WorktreeSnapshot: Equatable {
     public let behind: Int
     /// Commits on a detached HEAD that no branch or remote contains.
     public let unpushedCommits: Int
+    /// The full hash of the commit HEAD is at; nil on a branch with no commits yet.
+    public let head: String?
 
     public init(
         path: URL,
@@ -35,7 +37,8 @@ public struct WorktreeSnapshot: Equatable {
         dirtyModifiedAt: Date? = nil,
         lastActivity: Date?,
         behind: Int = 0,
-        unpushedCommits: Int = 0
+        unpushedCommits: Int = 0,
+        head: String? = nil
     ) {
         self.path = path
         self.name = name
@@ -46,6 +49,7 @@ public struct WorktreeSnapshot: Equatable {
         self.lastActivity = lastActivity
         self.behind = behind
         self.unpushedCommits = unpushedCommits
+        self.head = head
     }
 }
 
@@ -101,13 +105,22 @@ public struct StashSnapshot: Equatable {
     public let hash: String
     public let message: String
     public let date: Date
+    /// The full hash of the commit the stash was made on.
+    public let base: String?
 
-    public init(name: String, hash: String, message: String, date: Date) {
+    public init(name: String, hash: String, message: String, date: Date, base: String? = nil) {
         self.name = name
         self.hash = hash
         self.message = message
         self.date = date
+        self.base = base
     }
+
+    /// The branch the stash was made on, as its message names it; nil when it was made on no branch.
+    public var branch: String? { nil }
+
+    /// The message without the branch git writes before it.
+    public var text: String { message }
 }
 
 public struct CommitSnapshot: Equatable {
