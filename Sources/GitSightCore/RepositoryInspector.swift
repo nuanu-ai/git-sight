@@ -112,7 +112,6 @@ public struct RepositoryInspector {
     /// Boundary commits mark where the range starts, e.g. what the server already has.
     public func history(in repositoryURL: URL, revisions: [String], limit: Int = historyPage) throws -> [CommitSnapshot] {
         let format = "%m%x1F%H%x1F%h%x1F%s%x1F%an%x1F%cI%x1F%P%x1F%D%x1E"
-        let limit = 300
         // "--" keeps a file named like a revision, e.g. HEAD, from making git log ambiguous.
         let output = try git.output(in: repositoryURL, [
             "log", "--topo-order", "--boundary", "--decorate=full", "-n", String(limit), "--date=iso-strict", "--pretty=format:\(format)"
@@ -141,7 +140,7 @@ public struct RepositoryInspector {
 
     /// The whole history behind `tips`, with commits that no remote branch holds marked.
     public func history(of tips: [String], in repositoryURL: URL, limit: Int = historyPage) throws -> [CommitSnapshot] {
-        try marked(history(in: repositoryURL, revisions: tips), tips: tips, in: repositoryURL)
+        try marked(history(in: repositoryURL, revisions: tips, limit: limit), tips: tips, in: repositoryURL)
     }
 
     /// Marks the commits reachable from `tips` that no remote branch holds.
@@ -170,7 +169,7 @@ public struct RepositoryInspector {
         // An orphan branch with no commits yet leaves HEAD pointing nowhere, and naming it would fail the log.
         let head = try git.optionalOutput(in: repositoryURL, ["rev-parse", "--verify", "--quiet", "HEAD"]) == nil ? [] : ["HEAD"]
         let tips = ["--branches"] + head + detached.map(\.head)
-        var commits = try marked(history(in: repositoryURL, revisions: tips + ["--remotes", "--tags"]), tips: tips, in: repositoryURL)
+        var commits = try marked(history(in: repositoryURL, revisions: tips + ["--remotes", "--tags"], limit: limit), tips: tips, in: repositoryURL)
         for (name, head) in detached {
             if let index = commits.firstIndex(where: { $0.fullHash == head }) {
                 commits[index].refs.append(CommitRef(kind: .worktree, name: name))
