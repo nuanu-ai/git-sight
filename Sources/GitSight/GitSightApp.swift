@@ -23,6 +23,7 @@ struct GitSightApp: App {
                     .keyboardShortcut("r")
                     .disabled(model.rootURL == nil || model.isScanning)
             }
+            TextSizeCommands()
         }
     }
 }

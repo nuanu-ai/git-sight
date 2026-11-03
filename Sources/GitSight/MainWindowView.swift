@@ -12,12 +12,11 @@ struct MainWindowView: View {
                 WorkspaceStateView(model: model)
                     .frame(minWidth: 640, minHeight: 420)
             } else {
+                // Two columns: a repository's findings fold out under it in the sidebar,
+                // so the graph and the diff get the rest of the window.
                 NavigationSplitView {
                     RepositorySidebar(model: model)
-                        .navigationSplitViewColumnWidth(min: 240, ideal: 300, max: 440)
-                } content: {
-                    FindingList(model: model)
-                        .navigationSplitViewColumnWidth(min: 300, ideal: 400, max: 600)
+                        .navigationSplitViewColumnWidth(min: 260, ideal: 330, max: 480)
                 } detail: {
                     FindingDetail(model: model)
                 }
@@ -26,8 +25,8 @@ struct MainWindowView: View {
                 .navigationTitle(model.selectedRepository?.name ?? "git-sight")
                 .navigationSubtitle(model.selectedRepository.map { RepositoryText.path($0.path) } ?? "")
                 // macOS's 13 pt default reads too small for a window you scan at a glance.
-                .font(.title3)
-                .frame(minWidth: 960, minHeight: 560)
+                .textRole(.primary)
+                .frame(minWidth: 820, minHeight: 560)
             }
         }
         .toolbar {
@@ -67,7 +66,7 @@ private struct WorkspaceStateView: View {
                 ProgressView(value: model.scanProgress?.fractionCompleted ?? 0)
                     .frame(width: 280)
                 Text(status)
-                    .font(.body)
+                    .textRole(.secondary)
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
                 Button("Остановить", action: model.cancelScan)
@@ -166,6 +165,31 @@ struct RepositorySidebar: View {
         }
     }
 
+    /// A repository's row selects its graph; a finding's row selects that finding.
+    private var selection: Binding<String?> {
+        Binding {
+            model.selectedFindingID
+        } set: { id in
+            guard let id else { return }
+            if let repository = model.repositories.first(where: { WorkspaceModel.graphID(of: $0) == id }) {
+                model.selectedPath = repository.path
+            }
+            model.selectedFindingID = id
+        }
+    }
+
+    /// The selected repository's work, folded out under its row: uncommitted, then local commits, then stashes.
+    @ViewBuilder
+    private func findings(of repository: RepositorySnapshot) -> some View {
+        if repository.path == model.selectedPath {
+            let order: [Finding.Kind] = [.uncommitted, .branch, .detached, .stash]
+            ForEach(repository.findings.sorted { order.firstIndex(of: $0.kind) ?? 0 < order.firstIndex(of: $1.kind) ?? 0 }) { finding in
+                FindingRow(finding: finding)
+                    .tag(finding.id)
+            }
+        }
+    }
+
     private func list(now: Date) -> some View {
         let all = model.filteredRepositories
         let active = all
@@ -174,7 +198,7 @@ struct RepositorySidebar: View {
             .sorted { $0.1.date > $1.1.date }
         let activePaths = Set(active.map(\.0.path))
         let repositories = all.filter { !activePaths.contains($0.path) }
-        return List(selection: $model.selectedPath) {
+        return List(selection: selection) {
             // Headers are plain rows rather than section headers: the list insets section headers
             // differently from rows, and one inset keeps chevrons, dots, names and numbers on shared lines.
             if !active.isEmpty {
@@ -182,6 +206,7 @@ struct RepositorySidebar: View {
                 if isExpanded("now") {
                     ForEach(active, id: \.0.path) { repository, change in
                         RepositoryRow(repository: repository, activity: change)
+                        findings(of: repository)
                     }
                 }
             }
@@ -193,6 +218,7 @@ struct RepositorySidebar: View {
                     if isExpanded(key) {
                         ForEach(group, id: \.path) { repository in
                             RepositoryRow(repository: repository)
+                            findings(of: repository)
                         }
                     }
                 }
@@ -218,21 +244,21 @@ private struct RepositoryRow: View {
                     .lineLimit(1)
                 // The age on the right already says when; the line says what.
                 Text(activity?.text ?? repository.summary)
-                    .font(.body)
+                    .textRole(.secondary)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
             Spacer(minLength: 4)
             if let oldest = repository.oldestUnsavedWork {
                 Text(RepositoryText.age(oldest, short: true))
-                    .font(.body)
+                    .textRole(.secondary)
                     .fontWeight(repository.severity >= .warning ? .semibold : .regular)
                     .monospacedDigit()
                     .foregroundStyle(repository.severity.tint)
             }
         }
         .padding(.vertical, 2)
-        .tag(repository.path)
+        .tag(WorkspaceModel.graphID(of: repository))
         .help(RepositoryText.path(repository.path))
         .contextMenu { RepositoryActions(repository: repository) }
         .accessibilityElement(children: .combine)
@@ -281,8 +307,8 @@ private struct SidebarFooter: View {
                         VStack(alignment: .leading, spacing: 10) {
                             ForEach(model.scanFailures, id: \.path) { failure in
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(RepositoryText.path(failure.path)).font(.body.weight(.medium))
-                                    Text(failure.message).font(.callout).foregroundStyle(.secondary)
+                                    Text(RepositoryText.path(failure.path)).fontWeight(.medium)
+                                    Text(failure.message).textRole(.secondary).foregroundStyle(.secondary)
                                 }
                                 .textSelection(.enabled)
                             }
@@ -293,7 +319,7 @@ private struct SidebarFooter: View {
                 }
             }
         }
-        .font(.body)
+        .textRole(.secondary)
         .foregroundStyle(.secondary)
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -308,7 +334,8 @@ private struct SeverityBadge: View {
 
     var body: some View {
         Text(severity.title)
-            .font(.body.weight(.semibold))
+            .textRole(.secondary)
+            .fontWeight(.semibold)
             .foregroundStyle(severity == .attention ? Color.black.opacity(0.8) : .white)
             .padding(.horizontal, 8)
             .padding(.vertical, 2)
@@ -338,15 +365,17 @@ private struct SidebarHeader: View {
         } label: {
             HStack(spacing: SidebarGrid.gap) {
                 Image(systemName: "chevron.right")
-                    .font(.caption.weight(.bold))
+                    .textRole(.label)
+                    .fontWeight(.bold)
                     .foregroundStyle(.secondary)
                     .rotationEffect(.degrees(isExpanded ? 90 : 0))
                     .frame(width: SidebarGrid.marker)
                 Text(title)
-                    .font(.headline)
+                    .fontWeight(.semibold)
                 Spacer(minLength: 4)
                 Text("\(count)")
-                    .font(.subheadline.weight(.semibold))
+                    .textRole(.label)
+                    .fontWeight(.semibold)
                     .monospacedDigit()
                     .foregroundStyle(color == Severity.attention.color ? Color.black.opacity(0.8) : .white)
                     .padding(.horizontal, 7)
@@ -365,102 +394,29 @@ private struct SidebarHeader: View {
 
 // MARK: - Findings of one repository
 
-private struct FindingList: View {
-    @Bindable var model: WorkspaceModel
-
-    var body: some View {
-        if let repository = model.selectedRepository {
-            let findings = repository.findings
-            List(selection: $model.selectedFindingID) {
-                // Every section has a title: a section without one turns the list into an outline,
-                // which insets its rows differently.
-                Section("Репозиторий") {
-                    GraphRow(repository: repository)
-                        .tag(WorkspaceModel.graphID(of: repository))
-                    if findings.isEmpty {
-                        // Nothing to fix; the graph above is still there to watch. Kept on the rows' text column.
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Color.clear.frame(width: 16, height: 1)
-                            Text(repository.hasRemote
-                                 ? "Всё на сервере: здесь нет работы, которой не было бы на сервере."
-                                 : "Нет remote: вся история есть только на этом компьютере.")
-                                .foregroundStyle(.secondary)
-                        }
-                        .selectionDisabled()
-                    }
-                }
-                section("Не закоммичено", findings.filter { $0.kind == .uncommitted })
-                section("Нет на сервере", findings.filter { $0.kind == .branch || $0.kind == .detached })
-                section("Стэши", findings.filter { $0.kind == .stash })
-            }
-        } else {
-            ContentUnavailableView("Выберите репозиторий", systemImage: "sidebar.left")
-        }
-    }
-
-    @ViewBuilder
-    private func section(_ title: String, _ findings: [Finding]) -> some View {
-        if !findings.isEmpty {
-            Section(title) {
-                ForEach(findings) { finding in
-                    FindingRow(finding: finding)
-                        .tag(finding.id)
-                }
-            }
-        }
-    }
-}
-
-/// The whole repository's graph, on the same columns as the findings below it.
-private struct GraphRow: View {
-    let repository: RepositorySnapshot
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Image(systemName: "point.3.connected.trianglepath.dotted")
-                .foregroundStyle(.secondary)
-                .frame(width: 16)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Все ветки")
-                Text(repository.branchesSummary)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.vertical, 2)
-    }
-}
-
+/// A finding under its repository's row: the icon sits in the repository name's column.
 private struct FindingRow: View {
     let finding: Finding
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Image(systemName: finding.systemImage)
-                .foregroundStyle(finding.severity.tint)
-                .frame(width: 16)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
-                // Stash messages are prose; two lines keep them readable at the default width.
+        HStack(spacing: SidebarGrid.gap) {
+            Color.clear.frame(width: SidebarGrid.marker, height: 1)
+            HStack(spacing: 6) {
+                Image(systemName: finding.systemImage)
+                    .foregroundStyle(finding.severity.tint)
+                    .frame(width: 18)
+                    .accessibilityHidden(true)
                 Text(finding.title)
-                    .lineLimit(2)
-                    .truncationMode(.middle)
-                Text([finding.detail, finding.note].compactMap { $0 }.joined(separator: " · "))
-                    .font(.body)
-                    .foregroundStyle(.secondary)
                     .lineLimit(1)
-                    .truncationMode(.tail)
+                    .truncationMode(.middle)
             }
             Spacer(minLength: 4)
             Text(RepositoryText.age(finding.date, short: true))
-                .font(.body)
+                .textRole(.secondary)
                 .fontWeight(finding.severity >= .warning ? .semibold : .regular)
                 .monospacedDigit()
                 .foregroundStyle(finding.severity.tint)
         }
-        .padding(.vertical, 2)
         .help([finding.title, finding.detail, finding.note].compactMap { $0 }.joined(separator: "\n"))
     }
 }
@@ -484,7 +440,7 @@ private struct FindingDetail: View {
                 content
             }
         } else {
-            Color.clear
+            ContentUnavailableView("Выберите репозиторий", systemImage: "sidebar.left")
         }
     }
 
@@ -517,41 +473,40 @@ private struct GraphHeader: View {
     let repository: RepositorySnapshot
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Все ветки")
-                .font(.title2.weight(.semibold))
-            Text(repository.branchesSummary)
-                .foregroundStyle(.secondary)
-            Text(RepositoryText.path(repository.path))
-                .font(.body.monospaced())
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .textSelection(.enabled)
-            // Labels turn into icons as the column narrows, as in the finding header.
-            ViewThatFits(in: .horizontal) {
-                actions(iconsOnly: false)
-                actions(iconsOnly: true)
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 12) {
+                Text("Все ветки")
+                    .textRole(.title)
+                    .fontWeight(.semibold)
+                Spacer(minLength: 12)
+                DetailActions(location: repository.path)
             }
-            .padding(.top, 6)
+            Text(repository.branchesSummary)
+                .textRole(.secondary)
+                .foregroundStyle(.secondary)
         }
-        .padding(16)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
-extension GraphHeader {
-    fileprivate func actions(iconsOnly: Bool) -> some View {
-        HStack(spacing: 8) {
-            Button { Workspace.reveal(repository.path) } label: {
-                if iconsOnly { Image(systemName: "folder") } else { Text("Показать в Finder") }
+/// Finder and Terminal as icons: the path they open is in the window's title.
+private struct DetailActions: View {
+    let location: URL
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Button { Workspace.reveal(location) } label: {
+                Image(systemName: "folder").accessibilityLabel("Показать в Finder")
             }
             .help("Показать в Finder")
-            Button { Workspace.openTerminal(at: repository.path) } label: {
-                if iconsOnly { Image(systemName: "terminal") } else { Text("Открыть в Терминале") }
+            Button { Workspace.openTerminal(at: location) } label: {
+                Image(systemName: "terminal").accessibilityLabel("Открыть в Терминале")
             }
             .help("Открыть в Терминале")
         }
+        .buttonStyle(.borderless)
         .controlSize(.large)
         .fixedSize()
     }
@@ -562,35 +517,42 @@ private struct FindingHeader: View {
     let finding: Finding
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 2) {
             // One accent line: the badge names the verdict, the colored reason in the facts explains it.
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
+            HStack(spacing: 10) {
                 SeverityBadge(severity: finding.severity)
                 Text(finding.title)
-                    .font(.title2.weight(.semibold))
-                    .lineLimit(2)
+                    .textRole(.title)
+                    .fontWeight(.semibold)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
                     .textSelection(.enabled)
+                Spacer(minLength: 12)
+                // As the header narrows, the agent button's label shortens instead of truncating.
+                ViewThatFits(in: .horizontal) {
+                    actions(shortPrimary: false)
+                    actions(shortPrimary: true)
+                }
             }
             facts
-            Text(RepositoryText.path(finding.location))
-                .font(.body.monospaced())
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .textSelection(.enabled)
-            // As the column narrows, labels shorten step by step instead of truncating.
-            ViewThatFits(in: .horizontal) {
-                actions(shortPrimary: false, iconsOnly: false)
-                actions(shortPrimary: false, iconsOnly: true)
-                actions(shortPrimary: true, iconsOnly: true)
+                .textRole(.secondary)
+                .lineLimit(2)
+            // The repository's path is in the window's title; a worktree elsewhere is worth naming.
+            if finding.location != model.selectedRepository?.path {
+                Text(RepositoryText.path(finding.location))
+                    .textRole(.secondary)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
             }
-            .padding(.top, 6)
         }
-        .padding(16)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func actions(shortPrimary: Bool, iconsOnly: Bool) -> some View {
+    private func actions(shortPrimary: Bool) -> some View {
         HStack(spacing: 8) {
             // Fresh work is still being done, by you or an agent; a task for it would only get in the way.
             if finding.severity >= .warning || finding.work == .commits(upstreamGone: true) {
@@ -606,30 +568,14 @@ private struct FindingHeader: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.large)
                 // Hovering shows exactly what goes on the clipboard.
                 .help(model.agentTask(for: finding) ?? "")
                 .accessibilityValue(copied ? "Скопировано" : "")
             }
-            secondary("Показать в Finder", systemImage: "folder", iconOnly: iconsOnly) {
-                Workspace.reveal(finding.location)
-            }
-            secondary("Открыть в Терминале", systemImage: "terminal", iconOnly: iconsOnly) {
-                Workspace.openTerminal(at: finding.location)
-            }
+            DetailActions(location: finding.location)
         }
-        .controlSize(.large)
         .fixedSize()
-    }
-
-    private func secondary(_ title: String, systemImage: String, iconOnly: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            if iconOnly {
-                Image(systemName: systemImage).accessibilityLabel(title)
-            } else {
-                Text(title)
-            }
-        }
-        .help(title)
     }
 
     private var facts: Text {
@@ -673,12 +619,15 @@ struct FileRow: View {
                 .lineLimit(1)
                 .layoutPriority(1)
             Text(path.deletingLastPathComponent)
+                .textRole(.secondary)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer(minLength: 8)
             Text(letter)
-                .font(.body.monospaced().weight(.semibold))
+                .textRole(.secondary)
+                .fontWeight(.semibold)
+                .monospaced()
                 .foregroundStyle(statusColor)
                 .help(statusName)
         }

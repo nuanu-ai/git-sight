@@ -35,7 +35,8 @@ final class WorkspaceModel {
     var selectedPath: URL? {
         didSet {
             guard selectedPath != oldValue else { return }
-            selectedFindingID = selectedRepository.map { $0.findings.first?.id ?? Self.graphID(of: $0) }
+            // A repository opens on its graph; its findings sit right under it in the sidebar.
+            selectedFindingID = selectedRepository.map(Self.graphID)
         }
     }
     var selectedFindingID: String? {
@@ -90,7 +91,7 @@ final class WorkspaceModel {
         selectedRepository?.findings.first { $0.id == selectedFindingID }
     }
 
-    /// The middle column's first item: the graph of the whole repository, selected like a finding.
+    /// The repository's own row: the graph of all its branches, selected like a finding.
     static func graphID(of repository: RepositorySnapshot) -> String {
         "\(repository.path.path)|graph"
     }
@@ -208,7 +209,7 @@ final class WorkspaceModel {
             if previousFinding == Self.graphID(of: repository) || repository.findings.contains(where: { $0.id == previousFinding }) {
                 loadContent(refreshing: true)
             } else {
-                selectedFindingID = repository.findings.first?.id ?? Self.graphID(of: repository)
+                selectedFindingID = Self.graphID(of: repository)
             }
         }
     }

@@ -12,8 +12,10 @@ struct CommitGraph: View {
     /// Called when the last row scrolls into view, to read further back.
     var onReachEnd: (() -> Void)?
 
-    private static let rowHeight: CGFloat = 24
-    private static let laneSpacing: CGFloat = 12
+    @AppStorage(TextRole.sizeKey) private var textSize = TextRole.standardSize
+    /// 24 pt rows and 12 pt lanes at the standard text size, growing with it.
+    private var rowHeight: CGFloat { (textSize * 1.6).rounded() }
+    private var laneSpacing: CGFloat { (textSize * 0.8).rounded() }
     /// Radius of the turn where a line leaves or joins a row.
     private static let turn: CGFloat = 5
     // VS Code's graph palette: the first lane blue like the current branch, then scmGraph.foreground1–5.
@@ -56,11 +58,11 @@ struct CommitGraph: View {
         ScrollView {
             ZStack(alignment: .topLeading) {
                 rails(rows: rows)
-                    .frame(height: Self.rowHeight * CGFloat(rows.count))
+                    .frame(height: rowHeight * CGFloat(rows.count))
                 LazyVStack(spacing: 0) {
                     ForEach(Array(rows.enumerated()), id: \.element.id) { index, item in
-                        row(item.row, indent: Self.indent(lanes[index]))
-                            .frame(height: Self.rowHeight)
+                        row(item.row, indent: indent(lanes[index]))
+                            .frame(height: rowHeight)
                             .onAppear {
                                 if index == rows.count - 1 { onReachEnd?() }
                             }
@@ -72,7 +74,7 @@ struct CommitGraph: View {
     }
 
     /// Where a row's text starts: right after the rightmost line that crosses it, as in VS Code.
-    private static func indent(_ lane: Int) -> CGFloat {
+    private func indent(_ lane: Int) -> CGFloat {
         laneX(lane) + 12
     }
 
@@ -137,7 +139,7 @@ struct CommitGraph: View {
             var y: [String: CGFloat] = [:]
             for (index, item) in rows.enumerated() {
                 if case .commit(let commit) = item.row {
-                    y[commits[commit].fullHash] = (CGFloat(index) + 0.5) * Self.rowHeight
+                    y[commits[commit].fullHash] = (CGFloat(index) + 0.5) * rowHeight
                 }
             }
             // Work that exists only on this machine sits on one band across the whole width, under the lines;
@@ -152,31 +154,31 @@ struct CommitGraph: View {
                 if index < rows.count, local[index] {
                     start = start ?? index
                 } else if let first = start {
-                    let band = CGRect(x: 4, y: CGFloat(first) * Self.rowHeight, width: size.width - 12, height: CGFloat(index - first) * Self.rowHeight)
+                    let band = CGRect(x: 4, y: CGFloat(first) * rowHeight, width: size.width - 12, height: CGFloat(index - first) * rowHeight)
                     context.fill(Path(roundedRect: band, cornerRadius: 5), with: .color(.orange.opacity(0.12)))
                     start = nil
                 }
             }
             if let selectedY = selection.flatMap({ y[$0] }) {
-                let row = CGRect(x: 4, y: selectedY - Self.rowHeight / 2, width: size.width - 12, height: Self.rowHeight)
+                let row = CGRect(x: 4, y: selectedY - rowHeight / 2, width: size.width - 12, height: rowHeight)
                 context.fill(Path(roundedRect: row, cornerRadius: 5), with: .color(.accentColor.opacity(0.22)))
             }
             for commit in commits {
                 guard let childY = y[commit.fullHash] else { continue }
-                let start = CGPoint(x: Self.laneX(commit.lane), y: childY)
+                let start = CGPoint(x: laneX(commit.lane), y: childY)
                 for (offset, parentHash) in commit.parents.enumerated() {
                     // The core holds this lane for the parent until the parent's row, so nothing else sits on it.
                     let lane = offset < commit.parentLanes.count ? commit.parentLanes[offset] : commit.lane
                     let parent = commits.first { $0.fullHash == parentHash }.flatMap { parent in
-                        y[parentHash].map { CGPoint(x: Self.laneX(parent.lane), y: $0) }
+                        y[parentHash].map { CGPoint(x: laneX(parent.lane), y: $0) }
                     }
-                    let path = Self.edge(from: start, along: Self.laneX(lane), to: parent, bottom: size.height)
+                    let path = Self.edge(from: start, along: laneX(lane), to: parent, bottom: size.height)
                     context.stroke(path, with: .color(color(lane: lane)), lineWidth: 1.5)
                 }
             }
             for commit in commits {
                 guard let centerY = y[commit.fullHash] else { continue }
-                let center = CGPoint(x: Self.laneX(commit.lane), y: centerY)
+                let center = CGPoint(x: laneX(commit.lane), y: centerY)
                 let color = color(lane: commit.lane)
                 if commit.parents.count > 1 {
                     // A merge: a ring with a dot, as in VS Code.
@@ -218,7 +220,7 @@ struct CommitGraph: View {
         Path(ellipseIn: CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2))
     }
 
-    private static func laneX(_ lane: Int) -> CGFloat {
+    private func laneX(_ lane: Int) -> CGFloat {
         12 + CGFloat(max(0, lane)) * laneSpacing
     }
 
@@ -273,7 +275,8 @@ private struct CommitRow: View {
             }
             if commit.refs.count > shown {
                 Text(shown == 0 ? RepositoryText.counted(commit.refs.count, one: "метка", few: "метки", many: "меток") : "+\(commit.refs.count - shown)")
-                    .font(.caption.weight(.medium))
+                    .textRole(.label)
+                    .fontWeight(.medium)
                     .foregroundStyle(.secondary)
                     .help(sortedRefs.dropFirst(shown).map(\.name).joined(separator: "\n"))
             }
@@ -317,9 +320,12 @@ private struct RefBadge: View {
         let isLocal = ref.kind != .remoteBranch && ref.kind != .tag
         HStack(spacing: 3) {
             Image(systemName: icon)
-                .font(.caption2.weight(.semibold))
+                .textRole(.label)
+                .imageScale(.small)
+                .fontWeight(.semibold)
             Text(ref.name)
-                .font(.caption.weight(ref.isHead ? .bold : .medium))
+                .textRole(.label)
+                .fontWeight(ref.isHead ? .bold : .medium)
                 .lineLimit(1)
         }
         .padding(.horizontal, 5)
