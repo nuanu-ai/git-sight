@@ -14,7 +14,7 @@ struct GitSightApp: App {
                     model.refreshIfStale()
                 }
         }
-        .defaultSize(width: 1240, height: 780)
+        .defaultSize(width: 1360, height: 860)
         .commands {
             CommandGroup(after: .newItem) {
                 Button("Выбрать папку…", action: model.chooseRoot)

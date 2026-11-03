@@ -8,8 +8,8 @@ struct CommitGraph: View {
     let boundaryLabel: String
     @Binding var selection: String?
 
-    private static let rowHeight: CGFloat = 30
-    private static let laneSpacing: CGFloat = 14
+    private static let rowHeight: CGFloat = 36
+    private static let laneSpacing: CGFloat = 16
     private static let laneColors: [Color] = [.blue, .orange, .purple, .green, .pink, .teal]
 
     private var railWidth: CGFloat {
@@ -70,7 +70,7 @@ struct CommitGraph: View {
             }
             for (row, commit) in commits.enumerated() {
                 let center = point(row: row, lane: commit.lane)
-                let dot = Path(ellipseIn: CGRect(x: center.x - 4, y: center.y - 4, width: 8, height: 8))
+                let dot = Path(ellipseIn: CGRect(x: center.x - 5, y: center.y - 5, width: 10, height: 10))
                 if commit.isBoundary {
                     context.stroke(dot, with: .color(.secondary), lineWidth: 1.5)
                 } else {
@@ -107,13 +107,13 @@ private struct CommitRow: View {
                 .truncationMode(.tail)
                 .frame(maxWidth: .infinity, alignment: .leading)
             Text(commit.shortHash)
-                .font(.caption.monospaced())
+                .font(.body.monospaced())
                 .foregroundStyle(.secondary)
             Text(RepositoryText.age(commit.date, short: true))
-                .font(.caption)
+                .font(.body)
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
-                .frame(minWidth: 52, alignment: .trailing)
+                .frame(minWidth: 60, alignment: .trailing)
         }
         .padding(.horizontal, 8)
         .frame(maxHeight: .infinity)

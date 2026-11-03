@@ -13,10 +13,10 @@ struct MainWindowView: View {
             } else {
                 NavigationSplitView {
                     RepositorySidebar(model: model)
-                        .navigationSplitViewColumnWidth(min: 220, ideal: 280, max: 420)
+                        .navigationSplitViewColumnWidth(min: 240, ideal: 300, max: 440)
                 } content: {
                     FindingList(model: model)
-                        .navigationSplitViewColumnWidth(min: 280, ideal: 360, max: 560)
+                        .navigationSplitViewColumnWidth(min: 300, ideal: 400, max: 600)
                 } detail: {
                     FindingDetail(model: model)
                 }
@@ -24,7 +24,9 @@ struct MainWindowView: View {
                 // The window shows the split view's title, not the content column's.
                 .navigationTitle(model.selectedRepository?.name ?? "git-sight")
                 .navigationSubtitle(model.selectedRepository.map { RepositoryText.path($0.path) } ?? "")
-                .frame(minWidth: 900, minHeight: 520)
+                // macOS's 13 pt default reads too small for a window you scan at a glance.
+                .font(.title3)
+                .frame(minWidth: 960, minHeight: 560)
             }
         }
         .toolbar {
@@ -64,7 +66,7 @@ private struct WorkspaceStateView: View {
                 ProgressView(value: model.scanProgress?.fractionCompleted ?? 0)
                     .frame(width: 280)
                 Text(status)
-                    .font(.callout)
+                    .font(.body)
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
                 Button("Остановить", action: model.cancelScan)
@@ -135,10 +137,12 @@ private struct RepositorySidebar: View {
             ForEach([Severity.critical, .warning, .attention], id: \.self) { severity in
                 let group = repositories.filter { $0.severity == severity }
                 if !group.isEmpty {
-                    Section("\(severity.title) · \(group.count)") {
+                    Section {
                         ForEach(group, id: \.path) { repository in
                             RepositoryRow(repository: repository)
                         }
+                    } header: {
+                        SeverityHeader(severity: severity, count: group.count)
                     }
                 }
             }
@@ -149,7 +153,7 @@ private struct RepositorySidebar: View {
                         RepositoryRow(repository: repository)
                     }
                 } header: {
-                    Text("\(Severity.clean.title) · \(clean.count)")
+                    SeverityHeader(severity: .clean, count: clean.count)
                 }
             }
         }
@@ -178,16 +182,17 @@ private struct RepositoryRow: View {
                 Text(repository.name)
                     .lineLimit(1)
                 Text(repository.summary)
-                    .font(.caption)
+                    .font(.body)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
             Spacer(minLength: 4)
             if let oldest = repository.oldestUnsavedWork {
                 Text(RepositoryText.age(oldest, short: true))
-                    .font(.caption)
+                    .font(.body)
+                    .fontWeight(repository.severity >= .warning ? .semibold : .regular)
                     .monospacedDigit()
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(repository.severity.tint)
             }
         }
         .padding(.vertical, 2)
@@ -240,8 +245,8 @@ private struct SidebarFooter: View {
                         VStack(alignment: .leading, spacing: 10) {
                             ForEach(model.scanFailures, id: \.path) { failure in
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(RepositoryText.path(failure.path)).font(.callout.weight(.medium))
-                                    Text(failure.message).font(.caption).foregroundStyle(.secondary)
+                                    Text(RepositoryText.path(failure.path)).font(.body.weight(.medium))
+                                    Text(failure.message).font(.callout).foregroundStyle(.secondary)
                                 }
                                 .textSelection(.enabled)
                             }
@@ -252,10 +257,68 @@ private struct SidebarFooter: View {
                 }
             }
         }
-        .font(.caption)
+        .font(.body)
         .foregroundStyle(.secondary)
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+    }
+}
+
+// MARK: - Verdicts
+
+/// The verdict as a filled label, the strongest mark in the window.
+private struct SeverityBadge: View {
+    let severity: Severity
+
+    var body: some View {
+        Text(severity.title)
+            .font(.body.weight(.semibold))
+            .foregroundStyle(severity == .attention ? Color.black.opacity(0.8) : .white)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(severity.color))
+    }
+}
+
+private struct SeverityHeader: View {
+    let severity: Severity
+    let count: Int
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(severity.color)
+                .frame(width: 9, height: 9)
+            Text(severity.title)
+                .font(.headline)
+                .foregroundStyle(.primary)
+            Text("\(count)")
+                .font(.headline)
+                .foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// How bad the repository is and why, above its findings.
+private struct VerdictBanner: View {
+    let repository: RepositorySnapshot
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                SeverityBadge(severity: repository.severity)
+                Text(repository.reason)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(repository.severity.tint)
+            }
+            Text(repository.summary)
+                .font(.body)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -280,17 +343,13 @@ private struct FindingList: View {
                              : "У репозитория нет remote, вся история есть только на этом компьютере.")
                     }
                 } else {
-                    List(selection: $model.selectedFindingID) {
-                        section("Не закоммичено", findings.filter { $0.kind == .uncommitted })
-                        section("Нет на сервере", findings.filter { $0.kind == .branch || $0.kind == .detached })
-                        section("Стэши", findings.filter { $0.kind == .stash })
-                        if !repository.hasRemote {
-                            Section {
-                                Label("Нет remote: вся история есть только на этом компьютере.", systemImage: "externaldrive")
-                                    .font(.callout)
-                                    .foregroundStyle(.secondary)
-                                    .selectionDisabled()
-                            }
+                    VStack(spacing: 0) {
+                        VerdictBanner(repository: repository)
+                        Divider()
+                        List(selection: $model.selectedFindingID) {
+                            section("Не закоммичено", findings.filter { $0.kind == .uncommitted })
+                            section("Нет на сервере", findings.filter { $0.kind == .branch || $0.kind == .detached })
+                            section("Стэши", findings.filter { $0.kind == .stash })
                         }
                     }
                 }
@@ -319,7 +378,7 @@ private struct FindingRow: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Image(systemName: finding.systemImage)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(finding.severity.tint)
                 .frame(width: 16)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
@@ -328,16 +387,17 @@ private struct FindingRow: View {
                     .lineLimit(2)
                     .truncationMode(.middle)
                 Text([finding.detail, finding.note].compactMap { $0 }.joined(separator: " · "))
-                    .font(.caption)
+                    .font(.body)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
             Spacer(minLength: 4)
             Text(RepositoryText.age(finding.date, short: true))
-                .font(.caption)
+                .font(.body)
+                .fontWeight(finding.severity >= .warning ? .semibold : .regular)
                 .monospacedDigit()
-                .foregroundStyle(.secondary)
+                .foregroundStyle(finding.severity.tint)
         }
         .padding(.vertical, 2)
         .help([finding.title, finding.detail, finding.note].compactMap { $0 }.joined(separator: "\n"))
@@ -398,14 +458,21 @@ private struct FindingHeader: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                SeverityBadge(severity: finding.severity)
+                Text(finding.reason)
+                    .fontWeight(.medium)
+                    .foregroundStyle(finding.severity.tint)
+            }
+            .padding(.bottom, 2)
             Text(finding.title)
-                .font(.title3.weight(.semibold))
+                .font(.title2.weight(.semibold))
                 .lineLimit(2)
                 .textSelection(.enabled)
             Text(facts)
                 .foregroundStyle(.secondary)
             Text(RepositoryText.path(finding.location))
-                .font(.callout.monospaced())
+                .font(.body.monospaced())
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -440,6 +507,7 @@ private struct FindingHeader: View {
                 Workspace.openTerminal(at: finding.location)
             }
         }
+        .controlSize(.large)
         .fixedSize()
     }
 
@@ -455,12 +523,7 @@ private struct FindingHeader: View {
     }
 
     private var facts: String {
-        var parts = [finding.detail]
-        if let date = finding.date {
-            parts.append(RepositoryText.ago(date))
-        }
-        if let note = finding.note { parts.append(note) }
-        return parts.joined(separator: " · ")
+        [finding.detail, finding.note].compactMap { $0 }.joined(separator: " · ")
     }
 }
 
@@ -487,14 +550,14 @@ private struct FileRow: View {
         let path = file.path as NSString
         HStack(spacing: 8) {
             Text(file.status)
-                .font(.callout.monospaced().weight(.semibold))
+                .font(.body.monospaced().weight(.semibold))
                 .foregroundStyle(statusColor)
                 .frame(width: 14)
                 .help(statusName)
             Text(path.lastPathComponent)
                 .lineLimit(1)
             Text(path.deletingLastPathComponent)
-                .font(.caption)
+                .font(.body)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -532,7 +595,7 @@ private struct CommitFilesPane: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
                 Text(commit.shortHash)
-                    .font(.callout.monospaced())
+                    .font(.body.monospaced())
                     .textSelection(.enabled)
                 Text("\(commit.author) · \(RepositoryText.fullDate(commit.date))")
                     .foregroundStyle(.secondary)
@@ -543,7 +606,7 @@ private struct CommitFilesPane: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .font(.callout)
+            .font(.body)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             Divider()

@@ -14,28 +14,20 @@ enum RepositoryText {
     }()
 
     /// How long ago, without "назад": "8 месяцев", or "8 мес" when `short`.
+    /// Both round down from the same calendar components, so a row and its header always agree.
     static func age(_ date: Date?, short: Bool = false) -> String {
         guard let date else { return "—" }
-        let seconds = Date().timeIntervalSince(date)
-        if seconds < 60 { return "сейчас" }
-        if short {
-            // The system's abbreviated Russian units turn both minutes and months into "м.".
-            let minutes = Int(seconds / 60), hours = minutes / 60, days = hours / 24
-            if hours < 1 { return "\(minutes) мин" }
-            if days < 1 { return "\(hours) ч" }
-            if days < 7 { return "\(days) дн" }
-            if days < 30 { return "\(days / 7) нед" }
-            if days < 365 { return "\(days / 30) мес" }
-            return "\(days / 365) г"
-        }
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.locale = locale
-        let formatter = DateComponentsFormatter()
-        formatter.calendar = calendar
-        formatter.unitsStyle = .full
-        formatter.maximumUnitCount = 1
-        formatter.allowedUnits = [.year, .month, .weekOfMonth, .day, .hour, .minute]
-        return formatter.string(from: date, to: Date()) ?? "—"
+        let parts = Calendar(identifier: .gregorian).dateComponents([.year, .month, .day, .hour, .minute], from: date, to: Date())
+        let years = parts.year ?? 0, months = parts.month ?? 0, days = parts.day ?? 0
+        let hours = parts.hour ?? 0, minutes = parts.minute ?? 0
+        // Accusative forms: "неделю назад", "минуту без движения".
+        if years > 0 { return short ? "\(years) г" : counted(years, one: "год", few: "года", many: "лет") }
+        if months > 0 { return short ? "\(months) мес" : counted(months, one: "месяц", few: "месяца", many: "месяцев") }
+        if days >= 7 { return short ? "\(days / 7) нед" : counted(days / 7, one: "неделю", few: "недели", many: "недель") }
+        if days > 0 { return short ? "\(days) дн" : counted(days, one: "день", few: "дня", many: "дней") }
+        if hours > 0 { return short ? "\(hours) ч" : counted(hours, one: "час", few: "часа", many: "часов") }
+        if minutes > 0 { return short ? "\(minutes) мин" : counted(minutes, one: "минуту", few: "минуты", many: "минут") }
+        return "сейчас"
     }
 
     /// "8 месяцев назад", or "только что" within the first minute.
@@ -87,6 +79,11 @@ extension Severity {
         }
     }
 
+    /// Color only where something is wrong; work in progress stays neutral.
+    var tint: Color {
+        self >= .warning ? color : .secondary
+    }
+
     var title: String {
         switch self {
         case .clean: return "Чисто"
@@ -121,6 +118,32 @@ struct Finding: Identifiable, Hashable {
     let date: Date?
     let location: URL
     let source: Source
+    let severity: Severity
+    /// Why it has that severity, in a few words.
+    let reason: String
+
+    init(
+        id: String, kind: Kind, title: String, detail: String, note: String?, date: Date?,
+        location: URL, source: Source, verdict: (work: UnsavedWork, lastChanged: Date?)
+    ) {
+        self.id = id
+        self.kind = kind
+        self.title = title
+        self.detail = detail
+        self.note = note
+        self.date = date
+        self.location = location
+        self.source = source
+        let lastChanged = verdict.lastChanged ?? Date()
+        severity = Severity(of: verdict.work, lastChanged: lastChanged)
+        if severity >= .warning {
+            reason = "\(RepositoryText.age(lastChanged)) без движения"
+        } else if verdict.work == .commits(upstreamGone: true) {
+            reason = "ветку удалили на сервере"
+        } else {
+            reason = "изменено \(RepositoryText.ago(lastChanged))"
+        }
+    }
 
     var systemImage: String {
         switch kind {
@@ -145,7 +168,8 @@ extension RepositorySnapshot {
                 note: worktree.isMain ? nil : "ворктри · \(worktree.branch ?? "detached HEAD")",
                 date: worktree.dirtyModifiedAt ?? worktree.lastActivity,
                 location: worktree.path,
-                source: .uncommitted(worktree: worktree.path)
+                source: .uncommitted(worktree: worktree.path),
+                verdict: (.uncommitted, worktree.dirtyModifiedAt ?? worktree.lastActivity)
             ))
         }
         if hasRemote {
@@ -159,7 +183,8 @@ extension RepositorySnapshot {
                     note: branch.upstreamGone ? "удалена на сервере, вероятно влита" : nil,
                     date: branch.lastCommitDate,
                     location: worktrees.first { $0.branch == branch.name }?.path ?? path,
-                    source: .history(directory: path, revisions: ["refs/heads/\(branch.name)", "--not", "--remotes"])
+                    source: .history(directory: path, revisions: ["refs/heads/\(branch.name)", "--not", "--remotes"]),
+                    verdict: (.commits(upstreamGone: branch.upstreamGone), branch.lastCommitDate)
                 ))
             }
         }
@@ -172,7 +197,8 @@ extension RepositorySnapshot {
                 note: "detached HEAD",
                 date: worktree.lastActivity,
                 location: worktree.path,
-                source: .history(directory: worktree.path, revisions: ["HEAD", "--not", "--remotes", "--branches", "--tags"])
+                source: .history(directory: worktree.path, revisions: ["HEAD", "--not", "--remotes", "--branches", "--tags"]),
+                verdict: (.commits(upstreamGone: false), worktree.lastActivity)
             ))
         }
         // Stashes are shared by all worktrees; a bare repository can only list them from one.
@@ -194,10 +220,17 @@ extension RepositorySnapshot {
                 note: nil,
                 date: stash.date,
                 location: path,
-                source: .stash(directory: stashDirectory, name: stash.name)
+                source: .stash(directory: stashDirectory, name: stash.name),
+                verdict: (.stash, stash.date)
             ))
         }
         return findings.sorted { ($0.date ?? .distantFuture) < ($1.date ?? .distantFuture) }
+    }
+
+    /// Why the repository has its severity: the reason of its oldest worst finding.
+    var reason: String {
+        let worst = findings.filter { $0.severity == severity }.first
+        return worst?.reason ?? (hasRemote ? "всё на сервере" : "нет remote, история только на этом компьютере")
     }
 
     /// One line for the sidebar: what is at stake.
