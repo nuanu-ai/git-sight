@@ -106,6 +106,7 @@ enum RepositoryInspectorIntegrationTests {
             ("cut-off history does not claim the server has it", CommitTopologyIntegrationTests.testCutOffHistoryDoesNotClaimTheServerHasIt),
             ("history reads revisions shadowed by file names", CommitTopologyIntegrationTests.testHistoryReadsRevisionsShadowedByFileNames),
             ("parent lines cross no other commit", CommitTopologyIntegrationTests.testParentLinesCrossNoOtherCommit),
+            ("random histories draw without crossings", CommitTopologyIntegrationTests.testRandomHistoriesDrawWithoutCrossings),
             ("uncommitted and stashed files are listed", ChangedFilesIntegrationTests.testReportsUncommittedAndStashedFiles),
             ("stash keeps its files when another is pushed", ChangedFilesIntegrationTests.testStashKeepsItsFilesWhenAnotherIsPushed),
             ("watcher reports only the repository that changed", RepositoryWatcherIntegrationTests.testReportsOnlyTheRepositoryThatChanged),

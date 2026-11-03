@@ -207,10 +207,59 @@ enum CommitTopologyIntegrationTests {
         try runGit(in: repositoryURL, ["merge", "--no-ff", "feature", "-m", "c6"])
 
         let history = try RepositoryInspector().history(in: repositoryURL, revisions: ["refs/heads/main"])
+        try expectEqual(crossings(in: history), [], "a line to a parent passes no other commit's dot")
+    }
+
+    static func testRandomHistoriesDrawWithoutCrossings() throws {
+        let repositoryURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent(".build/GitSightTests/\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: repositoryURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: repositoryURL) }
+        try runGit(in: repositoryURL, ["init", "-b", "main"])
+        let emptyTree = try gitOutput(in: repositoryURL, ["hash-object", "-t", "tree", "/dev/null"])
+
+        // A fixed seed keeps the histories the same on every run.
+        var seed: UInt64 = 0x5EED
+        func random(_ bound: Int) -> Int {
+            seed = seed &* 6364136223846793005 &+ 1442695040888963407
+            return Int((seed >> 33) % UInt64(bound))
+        }
+        var found: [String] = []
+        for shape in 0..<40 {
+            var commits: [String] = []
+            for index in 0..<16 {
+                var parents: [String] = []
+                if !commits.isEmpty {
+                    // Mostly continue a recent line, sometimes fork from older work, sometimes merge.
+                    parents.append(commits[commits.count - 1 - random(min(3, commits.count))])
+                    if commits.count > 2, random(10) < 4 {
+                        let other = commits[random(commits.count)]
+                        if other != parents[0] { parents.append(other) }
+                    }
+                }
+                commits.append(try gitOutput(
+                    in: repositoryURL,
+                    ["commit-tree", emptyTree, "-m", "s\(shape)c\(index)"] + parents.flatMap { ["-p", $0] },
+                    environment: ["GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "t@example.com", "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "t@example.com"]
+                ))
+            }
+            let history = try RepositoryInspector().history(in: repositoryURL, revisions: commits)
+            found += crossings(in: history)
+        }
+        try expectEqual(found, [], "lines in forty generated histories pass no other commit's dot")
+    }
+
+    private static func crossings(in history: [CommitSnapshot]) -> [String] {
         let rows = Dictionary(uniqueKeysWithValues: history.enumerated().map { ($0.element.fullHash, $0.offset) })
         var crossings: [String] = []
         for (row, commit) in history.enumerated() {
-            try expectEqual(commit.parentLanes.count, commit.parents.count, "\(commit.subject) has a lane for every parent")
+            if commit.parentLanes.count != commit.parents.count {
+                crossings.append("\(commit.subject) has no lane for some parents")
+                continue
+            }
             for (parent, lane) in zip(commit.parents, commit.parentLanes) {
                 guard let parentRow = rows[parent] else { continue }
                 for between in history[(row + 1)..<parentRow] where between.lane == lane {
@@ -218,6 +267,20 @@ enum CommitTopologyIntegrationTests {
                 }
             }
         }
-        try expectEqual(crossings, [], "a line to a parent passes no other commit's dot")
+        return crossings
+    }
+
+    private static func gitOutput(in repositoryURL: URL, _ arguments: [String], environment: [String: String] = [:]) throws -> String {
+        let process = Process()
+        let output = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = ["-C", repositoryURL.path] + arguments
+        process.environment = ProcessInfo.processInfo.environment.merging(environment) { _, new in new }
+        process.standardOutput = output
+        try process.run()
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { throw NSError(domain: "gitOutput", code: Int(process.terminationStatus)) }
+        return String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

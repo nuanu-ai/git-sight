@@ -281,18 +281,23 @@ public struct RepositoryInspector {
             }
             activeLanes[lane] = nil
 
+            var parentLanes: [Int] = []
             for (offset, parent) in commit.parents.enumerated() {
                 if offset == 0 {
                     // The first parent continues this line even when a side line already waits for it;
                     // the parent then takes the leftmost of the lanes waiting for it.
                     activeLanes[lane] = parent
-                } else if !activeLanes.contains(parent) {
+                    parentLanes.append(lane)
+                } else if let waiting = activeLanes.firstIndex(of: parent) {
+                    parentLanes.append(waiting)
+                } else {
                     let parentLane = activeLanes.firstIndex(of: nil) ?? activeLanes.count
                     if parentLane == activeLanes.count {
                         activeLanes.append(parent)
                     } else {
                         activeLanes[parentLane] = parent
                     }
+                    parentLanes.append(parentLane)
                 }
             }
             laidOutCommits.append(CommitSnapshot(
@@ -304,18 +309,11 @@ public struct RepositoryInspector {
                 parents: commit.parents,
                 refs: commit.refs,
                 lane: lane,
+                parentLanes: parentLanes,
                 isBoundary: commit.isBoundary
             ))
         }
-        let lanes = Dictionary(laidOutCommits.map { ($0.fullHash, $0.lane) }, uniquingKeysWith: { first, _ in first })
-        return laidOutCommits.map { commit in
-            CommitSnapshot(
-                fullHash: commit.fullHash, shortHash: commit.shortHash, subject: commit.subject, author: commit.author,
-                date: commit.date, parents: commit.parents, refs: commit.refs, lane: commit.lane,
-                parentLanes: commit.parents.enumerated().map { $0.offset == 0 ? commit.lane : lanes[$0.element] ?? commit.lane },
-                isBoundary: commit.isBoundary
-            )
-        }
+        return laidOutCommits
     }
 
     private func webURL(from remote: String) -> URL? {
