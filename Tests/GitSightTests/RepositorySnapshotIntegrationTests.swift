@@ -49,7 +49,10 @@ enum RepositorySnapshotIntegrationTests {
         try runGit(in: repositoryURL, ["stash", "push", "-m", "saved work"])
         try "dirty\n".write(to: repositoryURL.appendingPathComponent("untracked.txt"), atomically: true, encoding: .utf8)
         try "linked dirty\n".write(to: linkedURL.appendingPathComponent("untracked.txt"), atomically: true, encoding: .utf8)
-        try runGit(in: repositoryURL, ["remote", "set-url", "origin", "git@github.com:example/git-sight.git"])
+        // Remotes named by a shorthand that url.<base>.insteadOf expands; the longest matching prefix wins.
+        try runGit(in: repositoryURL, ["config", "url.https://wrong.example/.insteadOf", "g"])
+        try runGit(in: repositoryURL, ["config", "url.git@github.com:.insteadOf", "gh:"])
+        try runGit(in: repositoryURL, ["remote", "set-url", "origin", "gh:example/git-sight.git"])
 
         let fingerprintBefore = try filesystemFingerprint(of: repositoryURL)
         let snapshot = try RepositoryInspector().inspect(repositoryAt: repositoryURL)
@@ -61,7 +64,7 @@ enum RepositorySnapshotIntegrationTests {
         try expectEqual(snapshot.ahead, 1, "snapshot reports commits ahead of the local upstream ref")
         try expectEqual(snapshot.behind, 1, "snapshot reports commits behind the local upstream ref")
         try expectEqual(snapshot.dirtyFileCount, 1, "snapshot reports main worktree dirt")
-        try expectEqual(snapshot.remoteWebURL, URL(string: "https://github.com/example/git-sight"), "snapshot converts SSH remote to web URL")
+        try expectEqual(snapshot.remoteWebURL, URL(string: "https://github.com/example/git-sight"), "snapshot expands the remote's shorthand and converts SSH to a web URL")
 
         let mainWorktree = snapshot.worktrees.first { $0.isMain }
         let linkedWorktree = snapshot.worktrees.first { $0.path == linkedURL }

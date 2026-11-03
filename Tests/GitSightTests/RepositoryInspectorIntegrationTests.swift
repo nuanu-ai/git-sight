@@ -118,6 +118,7 @@ enum RepositoryInspectorIntegrationTests {
             ("fresh leftovers give no age", UnfinishedWorkIntegrationTests.testFreshLeftoversGiveNoAge),
             ("partial clones fetch nothing", UnfinishedWorkIntegrationTests.testPartialClonesFetchNothing),
             ("branches in use are not leftovers", UnfinishedWorkIntegrationTests.testBranchesInUseAreNotLeftovers),
+            ("merge is read again when the base moves", UnfinishedWorkIntegrationTests.testMergeIsReadAgainWhenTheBaseMoves),
             ("diffs show what changed line by line", FileDiffIntegrationTests.testDiffsShowWhatChangedLineByLine),
             ("random histories draw without crossings", CommitTopologyIntegrationTests.testRandomHistoriesDrawWithoutCrossings),
             ("uncommitted and stashed files are listed", ChangedFilesIntegrationTests.testReportsUncommittedAndStashedFiles),

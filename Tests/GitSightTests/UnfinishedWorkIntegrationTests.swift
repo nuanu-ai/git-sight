@@ -237,6 +237,41 @@ enum UnfinishedWorkIntegrationTests {
         try expectEqual(snapshot.leftoverBranches.map(\.name), ["held"], "only the branch in an idle worktree is left behind")
     }
 
+    /// A branch read once as unmerged is read again when the base takes it in: the answer for a branch
+    /// stands only while neither it nor the base moves.
+    static func testMergeIsReadAgainWhenTheBaseMoves() throws {
+        let rootURL = scratchURL()
+        let originURL = rootURL.appendingPathComponent("origin.git")
+        let repositoryURL = rootURL.appendingPathComponent("repository")
+        try FileManager.default.createDirectory(at: repositoryURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        try runGit(in: rootURL, ["init", "--bare", "-b", "main", originURL.path])
+        try runGit(in: repositoryURL, ["init", "-b", "main"])
+        try runGit(in: repositoryURL, ["config", "user.name", "Test User"])
+        try runGit(in: repositoryURL, ["config", "user.email", "test@example.com"])
+        func commit(_ name: String) throws {
+            try "\(name)\n".write(to: repositoryURL.appendingPathComponent("\(name).txt"), atomically: true, encoding: .utf8)
+            try runGit(in: repositoryURL, ["add", "\(name).txt"])
+            try runGit(in: repositoryURL, ["commit", "-m", name])
+        }
+        try commit("start")
+        try runGit(in: repositoryURL, ["remote", "add", "origin", originURL.path])
+        try runGit(in: repositoryURL, ["push", "-u", "origin", "main"])
+        try runGit(in: repositoryURL, ["switch", "-c", "feature"])
+        try commit("feature")
+        try runGit(in: repositoryURL, ["push", "-u", "origin", "feature"])
+        try runGit(in: repositoryURL, ["switch", "main"])
+        try commit("other")
+        try runGit(in: repositoryURL, ["push", "origin", "main"])
+        let unmerged = { try RepositoryInspector().inspect(repositoryAt: repositoryURL).branches.first { $0.name == "feature" }?.unmergedCommits }
+        try expectEqual(try unmerged(), 1, "the base has none of the branch yet")
+
+        try runGit(in: repositoryURL, ["merge", "--squash", "feature"])
+        try runGit(in: repositoryURL, ["commit", "-m", "Squash feature"])
+        try runGit(in: repositoryURL, ["push", "origin", "main"])
+        try expectEqual(try unmerged(), 0, "once the base squashes it in, the branch reads as merged")
+    }
+
     private static func scratchURL() -> URL {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
