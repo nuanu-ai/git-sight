@@ -198,8 +198,8 @@ final class WorkspaceModel {
                 return .history(try inspector.history(in: directory, revisions: revisions))
             case .uncommitted(let worktree):
                 return .files(try inspector.uncommittedFiles(in: worktree))
-            case .stash(let directory, let name):
-                return .files(try inspector.stashFiles(in: directory, stash: name))
+            case .stash(let directory, _, let hash):
+                return .files(try inspector.stashFiles(in: directory, stash: hash))
             }
         }
         contentTask = Task { [weak self] in

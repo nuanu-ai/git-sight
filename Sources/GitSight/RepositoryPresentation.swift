@@ -107,7 +107,8 @@ struct Finding: Identifiable, Hashable {
     enum Source: Hashable {
         case history(directory: URL, revisions: [String])
         case uncommitted(worktree: URL)
-        case stash(directory: URL, name: String)
+        /// `hash` addresses the stash; `name` (stash@{n}) shifts when another stash is pushed.
+        case stash(directory: URL, name: String, hash: String)
     }
 
     let id: String
@@ -213,14 +214,14 @@ extension RepositorySnapshot {
                 detail += " · \(branch)"
             }
             findings.append(Finding(
-                id: "\(path.path)|stash:\(stash.name)",
+                id: "\(path.path)|stash:\(stash.hash)",
                 kind: .stash,
                 title: message,
                 detail: detail,
                 note: nil,
                 date: stash.date,
                 location: path,
-                source: .stash(directory: stashDirectory, name: stash.name),
+                source: .stash(directory: stashDirectory, name: stash.name, hash: stash.hash),
                 verdict: (.stash, stash.date)
             ))
         }
@@ -268,9 +269,9 @@ extension RepositorySnapshot {
             lines.append("В ворктри \(place) на detached HEAD есть коммиты, которых нет ни в одной ветке и ни на сервере (\(RepositoryText.commits(worktrees.first { $0.path == finding.location }?.unpushedCommits ?? 0))), последний \(ago).")
             lines.append("Создай для них ветку и запушь, либо объясни, почему их можно выбросить.")
         case .stash:
-            guard case .stash(_, let name) = finding.source else { break }
-            lines.append("В репозитории \(RepositoryText.path(path)) есть стэш \(name) «\(finding.title)», создан \(ago).")
-            lines.append("Посмотри содержимое: `git stash show -p --include-untracked \(name)`. Если работа нужна, перенеси её в отдельную ветку и запушь.")
+            guard case .stash(_, let name, let hash) = finding.source else { break }
+            lines.append("В репозитории \(RepositoryText.path(path)) есть стэш \(name) «\(finding.title)», создан \(ago). Его коммит: \(hash).")
+            lines.append("Посмотри содержимое: `git stash show -p --include-untracked \(hash)`. Если работа нужна, перенеси её в отдельную ветку и запушь.")
         }
         lines.append("Ничего не удаляй без моего подтверждения.")
         return lines.joined(separator: "\n")
