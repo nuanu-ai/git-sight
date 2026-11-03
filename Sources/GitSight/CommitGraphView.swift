@@ -44,38 +44,40 @@ struct CommitGraph: View {
             for (row, commit) in commits.enumerated() where !commit.isBoundary {
                 let start = point(row: row, lane: commit.lane)
                 for (offset, parentHash) in commit.parents.enumerated() {
+                    // The core holds this lane for the parent until the parent's row, so nothing else sits on it.
+                    let lane = offset < commit.parentLanes.count ? commit.parentLanes[offset] : commit.lane
+                    let x = Self.laneX(lane)
                     var path = Path()
                     path.move(to: start)
                     if let parentRow = rows[parentHash] {
-                        let parentLane = commits[parentRow].lane
-                        let end = point(row: parentRow, lane: parentLane)
-                        if parentLane == commit.lane {
-                            path.addLine(to: end)
-                        } else if offset == 0 {
-                            // The child's lane is held for its first parent, so follow it down
-                            // and join the parent's line in the gap just above the parent.
-                            let bend = CGPoint(x: start.x, y: end.y - Self.rowHeight)
-                            path.addLine(to: bend)
-                            path.addCurve(
-                                to: end,
-                                control1: CGPoint(x: bend.x, y: bend.y + Self.rowHeight * 0.6),
-                                control2: CGPoint(x: end.x, y: end.y - Self.rowHeight * 0.6)
-                            )
+                        let end = point(row: parentRow, lane: commits[parentRow].lane)
+                        if end.y - start.y <= Self.rowHeight {
+                            Self.bend(&path, from: start, to: end)
                         } else {
-                            // A merge's other parent: bend within the gap below the child, then follow the parent's rail.
-                            let bend = CGPoint(x: end.x, y: start.y + Self.rowHeight)
-                            path.addCurve(
-                                to: bend,
-                                control1: CGPoint(x: start.x, y: start.y + Self.rowHeight * 0.6),
-                                control2: CGPoint(x: bend.x, y: bend.y - Self.rowHeight * 0.6)
-                            )
-                            path.addLine(to: end)
+                            // Into the held lane below the child, down it, into the parent's lane above the parent.
+                            var current = start
+                            if x != start.x {
+                                current = CGPoint(x: x, y: start.y + Self.rowHeight)
+                                Self.bend(&path, from: start, to: current)
+                            }
+                            let join = CGPoint(x: x, y: end.y - Self.rowHeight)
+                            if join.y > current.y { path.addLine(to: join) }
+                            if x != end.x {
+                                Self.bend(&path, from: join, to: end)
+                            } else {
+                                path.addLine(to: end)
+                            }
                         }
                     } else {
-                        // The parent is past the history limit.
-                        path.addLine(to: CGPoint(x: start.x, y: size.height))
+                        // The parent is past the history limit: the line runs off the bottom in its lane.
+                        var current = start
+                        if x != start.x {
+                            current = CGPoint(x: x, y: start.y + Self.rowHeight)
+                            Self.bend(&path, from: start, to: current)
+                        }
+                        path.addLine(to: CGPoint(x: x, y: size.height))
                     }
-                    context.stroke(path, with: .color(color(lane: commit.lane).opacity(0.7)), lineWidth: 1.5)
+                    context.stroke(path, with: .color(color(lane: lane).opacity(0.7)), lineWidth: 1.5)
                 }
             }
             for (row, commit) in commits.enumerated() {
@@ -89,6 +91,16 @@ struct CommitGraph: View {
             }
         }
         .accessibilityHidden(true)
+    }
+
+    /// An S-curve between two lanes that leaves and arrives vertically.
+    private static func bend(_ path: inout Path, from start: CGPoint, to end: CGPoint) {
+        let height = end.y - start.y
+        path.addCurve(
+            to: end,
+            control1: CGPoint(x: start.x, y: start.y + height * 0.6),
+            control2: CGPoint(x: end.x, y: end.y - height * 0.6)
+        )
     }
 
     private func point(row: Int, lane: Int) -> CGPoint {
