@@ -268,8 +268,8 @@ final class WorkspaceModel {
                 return .history(try inspector.repositoryHistory(in: graphOf))
             }
             switch finding.source {
-            case .history(let directory, let revisions):
-                return .history(try inspector.history(in: directory, revisions: revisions))
+            case .history(let directory, let tips):
+                return .history(try inspector.history(of: tips, in: directory))
             case .uncommitted(let worktree):
                 return .files(try inspector.uncommittedFiles(in: worktree))
             case .stash(let directory, _, let hash):

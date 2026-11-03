@@ -5,8 +5,6 @@ import SwiftUI
 /// Clicking a commit opens its files right under it, and the lanes run on through them.
 struct CommitGraph: View {
     let commits: [CommitSnapshot]
-    /// What the commits the range stops at have in common, e.g. "На сервере".
-    let boundaryLabel: String
     @Binding var selection: String?
     /// Files of the selected commit; nil while they load.
     let files: [CommitFileSnapshot]?
@@ -76,11 +74,10 @@ struct CommitGraph: View {
         switch row {
         case .commit(let index):
             let commit = commits[index]
-            CommitRow(commit: commit, boundaryLabel: boundaryLabel, laneColor: color(lane: commit.lane), isSelected: selection == commit.fullHash)
+            CommitRow(commit: commit, laneColor: color(lane: commit.lane), isSelected: selection == commit.fullHash)
                 .padding(.leading, railWidth)
                 .contentShape(Rectangle())
                 .onTapGesture {
-                    guard !commit.isBoundary else { return }
                     selection = selection == commit.fullHash ? nil : commit.fullHash
                 }
         case .file(let file):
@@ -108,7 +105,7 @@ struct CommitGraph: View {
                     y[commits[commit].fullHash] = (CGFloat(index) + 0.5) * Self.rowHeight
                 }
             }
-            for commit in commits where !commit.isBoundary {
+            for commit in commits {
                 guard let childY = y[commit.fullHash] else { continue }
                 let start = CGPoint(x: Self.laneX(commit.lane), y: childY)
                 for (offset, parentHash) in commit.parents.enumerated() {
@@ -125,9 +122,7 @@ struct CommitGraph: View {
                 guard let centerY = y[commit.fullHash] else { continue }
                 let center = CGPoint(x: Self.laneX(commit.lane), y: centerY)
                 let color = color(lane: commit.lane)
-                if commit.isBoundary {
-                    context.stroke(Self.circle(center, 4), with: .color(.secondary), lineWidth: 1.5)
-                } else if commit.parents.count > 1 {
+                if commit.parents.count > 1 {
                     // A merge: a ring with a dot, as in VS Code.
                     context.stroke(Self.circle(center, 4.5), with: .color(color), lineWidth: 1.5)
                     context.fill(Self.circle(center, 2), with: .color(color))
@@ -183,26 +178,21 @@ struct CommitGraph: View {
 
 private struct CommitRow: View {
     let commit: CommitSnapshot
-    let boundaryLabel: String
     let laneColor: Color
     let isSelected: Bool
 
     var body: some View {
         // Only what VS Code shows: the subject and its labels. Hash, author and date are in the tooltip.
-        HStack(spacing: 6) {
-            Text(commit.isBoundary ? "\(boundaryLabel): \(commit.subject)" : commit.subject)
-                .foregroundStyle(commit.isBoundary ? .secondary : .primary)
+        SubjectAndLabels {
+            Text(commit.subject)
                 .lineLimit(1)
                 .truncationMode(.tail)
-                .frame(minWidth: 120, alignment: .leading)
             // Labels stay whole: three, then one, then only the count, as the column narrows.
             ViewThatFits(in: .horizontal) {
                 labels(shown: 3)
                 labels(shown: 1)
                 labels(shown: 0)
             }
-            .layoutPriority(1)
-            Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 6)
@@ -218,19 +208,52 @@ private struct CommitRow: View {
               + (commit.isUnpushed ? "\nЭтого коммита нет на сервере" : ""))
     }
 
+    /// Where you are first, then what is local, then what lives on the server.
+    private var sortedRefs: [CommitRef] {
+        let order: [CommitRef.Kind] = [.head, .branch, .worktree, .tag, .remoteBranch]
+        return commit.refs.sorted {
+            ($0.isHead ? -1 : order.firstIndex(of: $0.kind) ?? 0) < ($1.isHead ? -1 : order.firstIndex(of: $1.kind) ?? 0)
+        }
+    }
+
     private func labels(shown: Int) -> some View {
         HStack(spacing: 4) {
-            ForEach(commit.refs.prefix(shown), id: \.self) { ref in
+            ForEach(sortedRefs.prefix(shown), id: \.self) { ref in
                 RefBadge(ref: ref, color: laneColor)
             }
             if commit.refs.count > shown {
                 Text(shown == 0 ? RepositoryText.counted(commit.refs.count, one: "метка", few: "метки", many: "меток") : "+\(commit.refs.count - shown)")
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.secondary)
-                    .help(commit.refs.dropFirst(shown).map(\.name).joined(separator: "\n"))
+                    .help(sortedRefs.dropFirst(shown).map(\.name).joined(separator: "\n"))
             }
         }
         .fixedSize()
+    }
+}
+
+/// The subject, then its labels right after it. The labels take what they need first, but the
+/// subject always keeps up to 120 pt, so a commit with many refs still says what it is.
+private struct SubjectAndLabels: Layout {
+    private let gap: CGFloat = 6
+    private let subjectFloor: CGFloat = 120
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let (subject, labels) = widths(proposal.width ?? .infinity, subviews)
+        let height = subviews.map { $0.sizeThatFits(.unspecified).height }.max() ?? 0
+        return CGSize(width: subject + gap + labels, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let (subject, labels) = widths(bounds.width, subviews)
+        subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.midY), anchor: .leading, proposal: ProposedViewSize(width: subject, height: bounds.height))
+        subviews[1].place(at: CGPoint(x: bounds.minX + subject + gap, y: bounds.midY), anchor: .leading, proposal: ProposedViewSize(width: labels, height: bounds.height))
+    }
+
+    private func widths(_ available: CGFloat, _ subviews: Subviews) -> (subject: CGFloat, labels: CGFloat) {
+        let ideal = subviews[0].sizeThatFits(.unspecified).width
+        let labels = subviews[1].sizeThatFits(ProposedViewSize(width: max(0, available - min(ideal, subjectFloor) - gap), height: nil)).width
+        return (min(ideal, max(0, available - labels - gap)), labels)
     }
 }
 

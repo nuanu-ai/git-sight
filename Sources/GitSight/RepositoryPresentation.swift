@@ -105,7 +105,8 @@ struct Finding: Identifiable {
 
     /// Where the detail column reads this finding from.
     enum Source: Hashable {
-        case history(directory: URL, revisions: [String])
+        /// The whole history behind the tips, with what the server lacks marked.
+        case history(directory: URL, tips: [String])
         case uncommitted(worktree: URL)
         /// `hash` addresses the stash; `name` (stash@{n}) shifts when another stash is pushed.
         case stash(directory: URL, name: String, hash: String)
@@ -186,7 +187,7 @@ extension RepositorySnapshot {
                     note: branch.upstreamGone ? "удалена на сервере" : nil,
                     date: branch.lastCommitDate,
                     location: worktrees.first { $0.branch == branch.name }?.path ?? path,
-                    source: .history(directory: path, revisions: ["refs/heads/\(branch.name)", "--not", "--remotes"]),
+                    source: .history(directory: path, tips: ["refs/heads/\(branch.name)"]),
                     verdict: (.commits(upstreamGone: branch.upstreamGone), branch.lastCommitDate)
                 ))
             }
@@ -200,7 +201,7 @@ extension RepositorySnapshot {
                 note: "detached HEAD",
                 date: worktree.lastActivity,
                 location: worktree.path,
-                source: .history(directory: worktree.path, revisions: ["HEAD", "--not", "--remotes", "--branches", "--tags"]),
+                source: .history(directory: worktree.path, tips: ["HEAD"]),
                 verdict: (.commits(upstreamGone: false), worktree.lastActivity)
             ))
         }

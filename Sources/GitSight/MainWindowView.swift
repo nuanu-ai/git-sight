@@ -497,8 +497,6 @@ private struct FindingDetail: View {
             case .history(let commits):
                 CommitGraph(
                     commits: commits,
-                    // A detached HEAD's range also stops at local branches and tags.
-                    boundaryLabel: model.selectedFinding?.kind == .detached ? "Уже в ветке или на сервере" : "На сервере",
                     selection: $model.selectedCommitHash,
                     files: model.commitFiles,
                     filesError: model.commitFilesError
