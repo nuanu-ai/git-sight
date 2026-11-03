@@ -499,7 +499,8 @@ private struct FindingDetail: View {
                     commits: commits,
                     selection: $model.selectedCommitHash,
                     files: model.commitFiles,
-                    filesError: model.commitFilesError
+                    filesError: model.commitFilesError,
+                    onReachEnd: model.loadMoreHistory
                 )
             case .files(let files):
                 FileList(files: files)

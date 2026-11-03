@@ -52,6 +52,9 @@ final class WorkspaceModel {
     }
 
     private(set) var findingContent: FindingContent?
+    /// How many commits the shown history reads; grows as the user scrolls to its end.
+    private var historyLimit = RepositoryInspector.historyPage
+    private var isLoadingMore = false
     private(set) var findingError: String?
     private(set) var commitFiles: [CommitFileSnapshot]?
     private(set) var commitFilesError: String?
@@ -253,6 +256,8 @@ final class WorkspaceModel {
         contentTask?.cancel()
         findingError = nil
         if !refreshing {
+            historyLimit = RepositoryInspector.historyPage
+            isLoadingMore = false
             commitTask?.cancel()
             findingContent = nil
             commitFiles = nil
@@ -261,15 +266,16 @@ final class WorkspaceModel {
         guard let id = selectedFindingID else { return }
         let finding = selectedFinding
         let graphOf = showsGraph ? selectedRepository?.path : nil
+        let limit = historyLimit
         let worker = Task.detached(priority: .userInitiated) { () throws -> FindingContent in
             let inspector = RepositoryInspector()
             guard let finding else {
                 guard let graphOf else { throw CancellationError() }
-                return .history(try inspector.repositoryHistory(in: graphOf))
+                return .history(try inspector.repositoryHistory(in: graphOf, limit: limit))
             }
             switch finding.source {
             case .history(let directory, let tips):
-                return .history(try inspector.history(of: tips, in: directory))
+                return .history(try inspector.history(of: tips, in: directory, limit: limit))
             case .uncommitted(let worktree):
                 return .files(try inspector.uncommittedFiles(in: worktree))
             case .stash(let directory, _, let hash):
@@ -279,6 +285,7 @@ final class WorkspaceModel {
         contentTask = Task { [weak self] in
             let result = await withTaskCancellationHandler { await worker.result } onCancel: { worker.cancel() }
             guard let self, !Task.isCancelled, self.selectedFindingID == id else { return }
+            self.isLoadingMore = false
             switch result {
             case .success(let content):
                 self.findingContent = content
@@ -291,6 +298,15 @@ final class WorkspaceModel {
                 self.findingError = error.localizedDescription
             }
         }
+    }
+
+    /// Reads the next page of the shown history, if the last read stopped at its limit.
+    func loadMoreHistory() {
+        guard !isLoadingMore, case .history(let commits) = findingContent,
+              commits.count(where: { !$0.isBoundary }) >= historyLimit else { return }
+        isLoadingMore = true
+        historyLimit += RepositoryInspector.historyPage
+        loadContent(refreshing: true)
     }
 
     /// The request "Скопировать задачу для агента" puts on the clipboard, with the files on screen.

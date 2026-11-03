@@ -9,6 +9,8 @@ struct CommitGraph: View {
     /// Files of the selected commit; nil while they load.
     let files: [CommitFileSnapshot]?
     let filesError: String?
+    /// Called when the last row scrolls into view, to read further back.
+    var onReachEnd: (() -> Void)?
 
     private static let rowHeight: CGFloat = 24
     private static let laneSpacing: CGFloat = 12
@@ -48,20 +50,20 @@ struct CommitGraph: View {
         return rows
     }
 
-    private var railWidth: CGFloat {
-        Self.laneX(commits.map(\.lane).max() ?? 0) + 12
-    }
-
     var body: some View {
         let rows = rows
+        let lanes = rowLanes(rows)
         ScrollView {
             ZStack(alignment: .topLeading) {
                 rails(rows: rows)
-                    .frame(width: railWidth, height: Self.rowHeight * CGFloat(rows.count))
+                    .frame(height: Self.rowHeight * CGFloat(rows.count))
                 LazyVStack(spacing: 0) {
-                    ForEach(rows, id: \.id) { item in
-                        row(item.row)
+                    ForEach(Array(rows.enumerated()), id: \.element.id) { index, item in
+                        row(item.row, indent: Self.indent(lanes[index]))
                             .frame(height: Self.rowHeight)
+                            .onAppear {
+                                if index == rows.count - 1 { onReachEnd?() }
+                            }
                     }
                 }
             }
@@ -69,20 +71,25 @@ struct CommitGraph: View {
         }
     }
 
+    /// Where a row's text starts: right after the rightmost line that crosses it, as in VS Code.
+    private static func indent(_ lane: Int) -> CGFloat {
+        laneX(lane) + 12
+    }
+
     @ViewBuilder
-    private func row(_ row: Row) -> some View {
+    private func row(_ row: Row, indent: CGFloat) -> some View {
         switch row {
         case .commit(let index):
             let commit = commits[index]
-            CommitRow(commit: commit, laneColor: color(lane: commit.lane), isSelected: selection == commit.fullHash)
-                .padding(.leading, railWidth)
+            CommitRow(commit: commit, laneColor: color(lane: commit.lane))
+                .padding(.leading, indent)
                 .contentShape(Rectangle())
                 .onTapGesture {
                     selection = selection == commit.fullHash ? nil : commit.fullHash
                 }
         case .file(let file):
             FileRow(file: file)
-                .padding(.leading, railWidth + 18)
+                .padding(.leading, indent + 18)
                 .padding(.trailing, 14)
         case .note(let text):
             HStack {
@@ -93,7 +100,35 @@ struct CommitGraph: View {
                 }
                 Spacer()
             }
-            .padding(.leading, railWidth + 18)
+            .padding(.leading, indent + 18)
+        }
+    }
+
+    /// The rightmost lane each row's lines reach: the commit's own and every edge passing through.
+    private func rowLanes(_ rows: [(id: String, row: Row)]) -> [Int] {
+        var rowOf: [String: Int] = [:]
+        for (index, item) in rows.enumerated() {
+            if case .commit(let commit) = item.row { rowOf[commits[commit].fullHash] = index }
+        }
+        // Lanes that start and stop crossing rows, swept from top to bottom.
+        var opens = Array(repeating: [Int](), count: rows.count + 1)
+        var closes = Array(repeating: [Int](), count: rows.count + 1)
+        for commit in commits {
+            guard let row = rowOf[commit.fullHash] else { continue }
+            opens[row].append(commit.lane)
+            closes[row + 1].append(commit.lane)
+            for (offset, parent) in commit.parents.enumerated() {
+                let lane = offset < commit.parentLanes.count ? commit.parentLanes[offset] : commit.lane
+                opens[row].append(lane)
+                // A parent past the history limit: the line runs off the bottom.
+                closes[(rowOf[parent] ?? rows.count - 1) + 1].append(lane)
+            }
+        }
+        var crossing: [Int: Int] = [:]
+        return (0..<rows.count).map { row in
+            for lane in closes[row] { crossing[lane, default: 0] -= 1 }
+            for lane in opens[row] { crossing[lane, default: 0] += 1 }
+            return crossing.filter { $0.value > 0 }.keys.max() ?? 0
         }
     }
 
@@ -104,6 +139,27 @@ struct CommitGraph: View {
                 if case .commit(let commit) = item.row {
                     y[commits[commit].fullHash] = (CGFloat(index) + 0.5) * Self.rowHeight
                 }
+            }
+            // Work that exists only on this machine sits on one band across the whole width, under the lines;
+            // the files of a selected commit stay on its band.
+            var owner: CommitSnapshot?
+            let local = rows.map { item -> Bool in
+                if case .commit(let index) = item.row { owner = commits[index] }
+                return owner?.isUnpushed ?? false
+            }
+            var start: Int?
+            for index in 0...rows.count {
+                if index < rows.count, local[index] {
+                    start = start ?? index
+                } else if let first = start {
+                    let band = CGRect(x: 4, y: CGFloat(first) * Self.rowHeight, width: size.width - 12, height: CGFloat(index - first) * Self.rowHeight)
+                    context.fill(Path(roundedRect: band, cornerRadius: 5), with: .color(.orange.opacity(0.12)))
+                    start = nil
+                }
+            }
+            if let selectedY = selection.flatMap({ y[$0] }) {
+                let row = CGRect(x: 4, y: selectedY - Self.rowHeight / 2, width: size.width - 12, height: Self.rowHeight)
+                context.fill(Path(roundedRect: row, cornerRadius: 5), with: .color(.accentColor.opacity(0.22)))
             }
             for commit in commits {
                 guard let childY = y[commit.fullHash] else { continue }
@@ -179,7 +235,6 @@ struct CommitGraph: View {
 private struct CommitRow: View {
     let commit: CommitSnapshot
     let laneColor: Color
-    let isSelected: Bool
 
     var body: some View {
         // Only what VS Code shows: the subject and its labels. Hash, author and date are in the tooltip.
@@ -197,11 +252,6 @@ private struct CommitRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 6)
         .frame(maxHeight: .infinity)
-        .background(
-            // Work that exists only on this machine reads as a band, the way the server's history does not.
-            RoundedRectangle(cornerRadius: 4)
-                .fill(isSelected ? Color.accentColor.opacity(0.18) : commit.isUnpushed ? Color.orange.opacity(0.12) : .clear)
-        )
         .accessibilityValue(commit.isUnpushed ? "нет на сервере" : "")
         .padding(.trailing, 8)
         .help("\(commit.subject)\n\(commit.shortHash) · \(commit.author) · \(RepositoryText.fullDate(commit.date)), \(RepositoryText.ago(commit.date))"
