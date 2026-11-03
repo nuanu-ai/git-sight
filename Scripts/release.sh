@@ -28,6 +28,15 @@ if grep -q "<sparkle:shortVersionString>$VERSION</sparkle:shortVersionString>" a
     exit 1
 fi
 
+# The private signing key lives in 1Password only; `op` asks for Touch ID. Read it before the
+# build, so a missing key stops the release before anything changes.
+KEY_REF=${SPARKLE_KEY_REF:-op://Private/git-sight Sparkle key/private key}
+if ! command -v op >/dev/null; then
+    echo "The 1Password CLI (op) is needed to sign the update." >&2
+    exit 1
+fi
+KEY=$(op read "$KEY_REF") || { echo "Couldn't read the signing key from $KEY_REF" >&2; exit 1; }
+
 # Sparkle compares CFBundleVersion, so it has to grow with every release.
 BUILD=$(git rev-list --count HEAD)
 LAST=$(sed -n 's|.*<sparkle:version>\(.*\)</sparkle:version>.*|\1|p' appcast.xml | head -n 1)
@@ -44,8 +53,8 @@ ZIP=Artifacts/GitSight-$VERSION.zip
 rm -f "$ZIP"
 ditto -c -k --sequesterRsrc --keepParent Artifacts/GitSight.app "$ZIP"
 
-# Reads the private key from the login keychain; macOS asks once.
-SIGNATURE=$(.build/artifacts/sparkle/Sparkle/bin/sign_update "$ZIP")
+SIGNATURE=$(printf '%s' "$KEY" | .build/artifacts/sparkle/Sparkle/bin/sign_update --ed-key-file - "$ZIP")
+unset KEY
 
 TAG=v$VERSION
 MINIMUM=$(plutil -extract LSMinimumSystemVersion raw "$PLIST")

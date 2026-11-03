@@ -65,13 +65,7 @@ sh Scripts/render_window.sh window.png .build/DemoWorkspace search-api unmerged 
 
 The app updates itself with [Sparkle](https://sparkle-project.org). Every hour it reads `appcast.xml` from `main`, and when a new version is out, an update button appears in the window.
 
-Once, before the first release, make a signing key. After `swift build` the Sparkle tools are in `.build/artifacts/sparkle/Sparkle/bin`:
-
-```sh
-.build/artifacts/sparkle/Sparkle/bin/generate_keys
-```
-
-It keeps the private key in your login keychain and prints the public key. Paste that into `SUPublicEDKey` in `Resources/Info.plist` over the placeholder. Export a backup with `generate_keys -x private-key-file`: lose the key and installed copies will refuse every later update.
+Updates are signed with an EdDSA key. The public half is `SUPublicEDKey` in `Resources/Info.plist`. The private half lives only in 1Password, at `op://Private/git-sight Sparkle key/private key`, and the release script reads it with the [1Password CLI](https://developer.1password.com/docs/cli/). Set `SPARKLE_KEY_REF` to read it from somewhere else. If the key is lost, installed copies will refuse every later update, so don't delete that item.
 
 For each release:
 
