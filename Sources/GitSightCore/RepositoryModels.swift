@@ -60,6 +60,10 @@ public struct BranchSnapshot: Equatable {
     public let unpushedCommits: Int
     /// The upstream was deleted on the server, usually after its pull request was merged.
     public let upstreamGone: Bool
+    /// The branch work is merged into: the server's default branch, or the local main without a server.
+    public let isBase: Bool
+    /// Commits the base does not have. A branch squash-merged into the base counts as merged: zero.
+    public let unmergedCommits: Int
 
     public init(
         name: String,
@@ -69,7 +73,9 @@ public struct BranchSnapshot: Equatable {
         lastCommitDate: Date?,
         hasWorktree: Bool,
         unpushedCommits: Int = 0,
-        upstreamGone: Bool = false
+        upstreamGone: Bool = false,
+        isBase: Bool = false,
+        unmergedCommits: Int = 0
     ) {
         self.name = name
         self.upstream = upstream
@@ -79,6 +85,8 @@ public struct BranchSnapshot: Equatable {
         self.hasWorktree = hasWorktree
         self.unpushedCommits = unpushedCommits
         self.upstreamGone = upstreamGone
+        self.isBase = isBase
+        self.unmergedCommits = unmergedCommits
     }
 }
 
@@ -223,6 +231,8 @@ public struct RepositorySnapshot: Equatable {
     public let remoteWebURL: URL?
     public let lastActivity: Date?
     public let hasRemote: Bool
+    /// The branch work is merged into, e.g. "main"; nil when the repository has none to tell.
+    public let baseBranch: String?
     /// Date of the oldest work that exists only on this machine.
     public let oldestUnsavedWork: Date?
     public let severity: Severity
@@ -240,6 +250,7 @@ public struct RepositorySnapshot: Equatable {
         remoteWebURL: URL? = nil,
         lastActivity: Date? = nil,
         hasRemote: Bool = true,
+        baseBranch: String? = nil,
         oldestUnsavedWork: Date? = nil,
         severity: Severity = .clean
     ) {
@@ -255,6 +266,7 @@ public struct RepositorySnapshot: Equatable {
         self.remoteWebURL = remoteWebURL
         self.lastActivity = lastActivity
         self.hasRemote = hasRemote
+        self.baseBranch = baseBranch
         self.oldestUnsavedWork = oldestUnsavedWork
         self.severity = severity
     }

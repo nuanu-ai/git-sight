@@ -40,12 +40,16 @@ enum RepositoryScore {
     }
 }
 
-/// A piece of work that exists only on this machine.
+/// A piece of work at risk: it exists only on this machine, or it never made it into the base branch.
 public enum UnsavedWork: Equatable {
     case uncommitted
     /// Commits on no remote; `upstreamGone` when the branch's upstream was deleted on the server.
     case commits(upstreamGone: Bool)
     case stash
+    /// A branch on the server that was never merged into the base: unfinished work that goes stale.
+    case unmerged
+    /// A branch already merged, or a worktree with nothing of its own: clutter to clean up.
+    case leftover
 }
 
 extension Severity {
@@ -61,6 +65,8 @@ extension Severity {
             abandonedAfter = RepositoryScore.goneUpstreamAge
         case .stash:
             abandonedAfter = RepositoryScore.abandonedStashAge
+        case .unmerged, .leftover:
+            abandonedAfter = RepositoryScore.abandonedAge
         }
         let age = now.timeIntervalSince(lastChanged)
         if age <= abandonedAfter {

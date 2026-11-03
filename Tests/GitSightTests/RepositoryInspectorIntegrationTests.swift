@@ -113,6 +113,7 @@ enum RepositoryInspectorIntegrationTests {
             ("reading never runs programs from repository config", GitSafetyIntegrationTests.testReadingNeverRunsProgramsFromRepositoryConfig),
             ("filters the user set up still apply", GitSafetyIntegrationTests.testFiltersTheUserSetUpStillApply),
             ("diffs read any file as git stores it", FileDiffIntegrationTests.testDiffsReadAnyFileAsGitStoresIt),
+            ("work not in the base branch is unfinished", UnfinishedWorkIntegrationTests.testWorkNotInTheBaseBranchIsUnfinished),
             ("diffs show what changed line by line", FileDiffIntegrationTests.testDiffsShowWhatChangedLineByLine),
             ("random histories draw without crossings", CommitTopologyIntegrationTests.testRandomHistoriesDrawWithoutCrossings),
             ("uncommitted and stashed files are listed", ChangedFilesIntegrationTests.testReportsUncommittedAndStashedFiles),
