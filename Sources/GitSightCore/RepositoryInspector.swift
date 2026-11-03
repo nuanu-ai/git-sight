@@ -301,9 +301,9 @@ public struct RepositoryInspector {
     public func repositoryHistory(in repositoryURL: URL, limit: Int = historyPage) throws -> [CommitSnapshot] {
         // Linked worktrees on no branch hold commits no ref reaches, often an agent's.
         // The first entry is the main worktree, whose HEAD the history reads anyway, or a bare repository.
-        // A worktree folder deleted by hand is skipped, as inspect skips it.
+        // A worktree folder deleted or emptied by hand is skipped, as inspect skips it.
         let detached = try worktreeEntries(in: repositoryURL).dropFirst().compactMap { entry in
-            entry.branch == nil && FileManager.default.fileExists(atPath: entry.path.path)
+            entry.branch == nil && Self.isCheckedOut(entry.path)
                 ? entry.head.map { (name: entry.path.lastPathComponent, head: $0) } : nil
         }
         // An orphan branch with no commits yet leaves HEAD pointing nowhere, and naming it would fail the log.
@@ -434,6 +434,12 @@ public struct RepositoryInspector {
         return entries
     }
 
+    /// Whether a worktree git still lists is a checkout: its folder holds its .git. A folder deleted or emptied
+    /// by hand is not; git status there fails, or worse, reads whatever repository encloses the folder.
+    private static func isCheckedOut(_ path: URL) -> Bool {
+        FileManager.default.fileExists(atPath: path.appendingPathComponent(".git").path)
+    }
+
     private func worktrees(
         _ entries: [(path: URL, head: String?, branch: String?, isBare: Bool)],
         in repositoryURL: URL,
@@ -441,10 +447,7 @@ public struct RepositoryInspector {
         mainFilters: [(key: String, value: String)]
     ) throws -> [WorktreeSnapshot] {
         // A bare repository is listed first but has no files; its linked worktrees are not main.
-        let present = entries.enumerated().filter { _, entry in
-            var isDirectory: ObjCBool = false
-            return !entry.isBare && FileManager.default.fileExists(atPath: entry.path.path, isDirectory: &isDirectory) && isDirectory.boolValue
-        }
+        let present = entries.enumerated().filter { _, entry in !entry.isBare && Self.isCheckedOut(entry.path) }
         let branchDates = Dictionary(branches.map { ($0.name, $0.lastCommitDate) }) { first, _ in first }
         // A worktree on a branch was last active at the branch's last commit; one call dates every other HEAD.
         let undated = present.compactMap { _, entry -> String? in
