@@ -1,0 +1,67 @@
+#!/bin/sh
+# Builds a release zip, signs it for Sparkle and adds it to appcast.xml.
+# Publishes nothing: it prints the commands that do.
+set -eu
+
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+cd "$ROOT"
+
+VERSION=${1:-}
+case "$VERSION" in
+    '' | *[!0-9.]* | .* | *.)
+        echo "usage: sh Scripts/release.sh <version>, for example 1.3" >&2
+        exit 64
+        ;;
+esac
+
+PLIST=Resources/Info.plist
+if plutil -extract SUPublicEDKey raw "$PLIST" | grep -q REPLACE; then
+    echo "SUPublicEDKey in $PLIST is still the placeholder. See Releasing in README.md." >&2
+    exit 1
+fi
+if grep -q "<sparkle:shortVersionString>$VERSION</sparkle:shortVersionString>" appcast.xml; then
+    echo "appcast.xml already has $VERSION" >&2
+    exit 1
+fi
+
+# Sparkle compares CFBundleVersion, so it has to grow with every release.
+BUILD=$(git rev-list --count HEAD)
+plutil -replace CFBundleShortVersionString -string "$VERSION" "$PLIST"
+plutil -replace CFBundleVersion -string "$BUILD" "$PLIST"
+
+sh Scripts/package_app.sh
+
+ZIP=Artifacts/GitSight-$VERSION.zip
+rm -f "$ZIP"
+ditto -c -k --sequesterRsrc --keepParent Artifacts/GitSight.app "$ZIP"
+
+# Reads the private key from the login keychain; macOS asks once.
+SIGNATURE=$(.build/artifacts/sparkle/Sparkle/bin/sign_update "$ZIP")
+
+TAG=v$VERSION
+MINIMUM=$(plutil -extract LSMinimumSystemVersion raw "$PLIST")
+ITEM="    <item>
+      <title>$VERSION</title>
+      <pubDate>$(LC_ALL=C date -u '+%a, %d %b %Y %H:%M:%S +0000')</pubDate>
+      <link>https://github.com/nuanu-ai/git-sight/releases/tag/$TAG</link>
+      <sparkle:version>$BUILD</sparkle:version>
+      <sparkle:shortVersionString>$VERSION</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>$MINIMUM</sparkle:minimumSystemVersion>
+      <enclosure url=\"https://github.com/nuanu-ai/git-sight/releases/download/$TAG/GitSight-$VERSION.zip\" type=\"application/octet-stream\" $SIGNATURE />
+    </item>"
+
+# Newest first: the item goes above the previous releases.
+ITEM=$ITEM awk '!done && (/<item>/ || /<\/channel>/) { print ENVIRON["ITEM"]; done = 1 } { print }' appcast.xml > appcast.xml.new
+mv appcast.xml.new appcast.xml
+
+cat <<EOF
+
+$ZIP is signed and appcast.xml lists $VERSION (build $BUILD).
+Publish the zip before main gets the new appcast, so the app never sees a link that is not there yet:
+
+  git commit -m "release: $VERSION" $PLIST appcast.xml
+  git tag $TAG
+  git push origin $TAG
+  gh release create $TAG $ZIP --verify-tag --title "git-sight $VERSION" --notes "..."
+  git push origin main
+EOF

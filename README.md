@@ -59,6 +59,28 @@ sh Scripts/render_window.sh window.png .build/DemoWorkspace search-api unmerged 
 
 The interface is in Russian.
 
+## Releasing
+
+The app updates itself with [Sparkle](https://sparkle-project.org). Every hour it reads `appcast.xml` from `main`, and when a new version is out, an update button appears in the window.
+
+Once, before the first release, make a signing key. After `swift build` the Sparkle tools are in `.build/artifacts/sparkle/Sparkle/bin`:
+
+```sh
+.build/artifacts/sparkle/Sparkle/bin/generate_keys
+```
+
+It keeps the private key in your login keychain and prints the public key. Paste that into `SUPublicEDKey` in `Resources/Info.plist` over the placeholder. Export a backup with `generate_keys -x private-key-file`: lose the key and installed copies will refuse every later update.
+
+For each release:
+
+```sh
+sh Scripts/release.sh 1.3
+```
+
+The script sets the version, builds and signs `Artifacts/GitSight-1.3.zip`, adds it to `appcast.xml`, and prints the commands that publish it. It publishes nothing itself. Upload the zip before pushing `main`, so the appcast never points at a file that isn't there yet.
+
+The app is signed ad hoc, without a Developer ID, so after the first download macOS asks before opening it. Updates through Sparkle don't ask again.
+
 ## License
 
 MIT
