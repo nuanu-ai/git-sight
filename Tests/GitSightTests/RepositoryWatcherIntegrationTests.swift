@@ -46,8 +46,9 @@ enum RepositoryWatcherIntegrationTests {
         let rootURL = makeRoot()
         defer { try? FileManager.default.removeItem(at: rootURL) }
         let repositoryURL = try makeRepository(at: rootURL.appendingPathComponent("repository"))
-        try "build/\n".write(to: repositoryURL.appendingPathComponent(".gitignore"), atomically: true, encoding: .utf8)
-        try runGit(in: repositoryURL, ["add", ".gitignore"])
+        // Ignores everything it does not track, as dotfile repositories do; that pattern also matches .git.
+        try "*\n".write(to: repositoryURL.appendingPathComponent(".gitignore"), atomically: true, encoding: .utf8)
+        try runGit(in: repositoryURL, ["add", "--force", ".gitignore"])
         try runGit(in: repositoryURL, ["commit", "-m", "Ignore build output"])
         let repository = try RepositoryInspector().inspect(repositoryAt: repositoryURL)
         let changes = ChangeLog()
@@ -66,6 +67,11 @@ enum RepositoryWatcherIntegrationTests {
         try "edit\n".write(to: repositoryURL.appendingPathComponent("tracked.txt"), atomically: true, encoding: .utf8)
         try await changes.wait()
         try expectEqual(changes.paths, [repository.path], "an edit next to ignored files is still reported")
+
+        changes.clear()
+        try runGit(in: repositoryURL, ["commit", "--all", "-m", "Edit"])
+        try await changes.wait()
+        try expectEqual(changes.paths, [repository.path], "a commit is reported even when .git matches an ignore rule")
         withExtendedLifetime(watcher) {}
     }
 
@@ -116,6 +122,10 @@ private final class ChangeLog: @unchecked Sendable {
 
     func add(_ paths: Set<URL>) {
         lock.withLock { reported.formUnion(paths) }
+    }
+
+    func clear() {
+        lock.withLock { reported = [] }
     }
 
     /// Waits for the first report, then a little longer so stray reports would show up too.
