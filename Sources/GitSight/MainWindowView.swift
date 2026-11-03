@@ -14,7 +14,7 @@ struct MainWindowView: View {
             } else {
                 NavigationSplitView {
                     RepositorySidebar(model: model)
-                        .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 360)
+                        .navigationSplitViewColumnWidth(min: 180, ideal: 210, max: 360)
                 } detail: {
                     if let repository = model.selectedRepository {
                         RepositoryView(model: model, repository: repository)

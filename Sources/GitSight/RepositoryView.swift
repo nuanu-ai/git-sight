@@ -8,7 +8,7 @@ struct RepositoryView: View {
     let repository: RepositorySnapshot
 
     /// The list's width, kept across launches; HSplitView forgets where its divider was.
-    @AppStorage("placeListWidth") private var listWidth = 324.0
+    @AppStorage("placeListWidth") private var listWidth = 360.0
 
     var body: some View {
         HStack(spacing: 0) {
@@ -167,8 +167,8 @@ private struct PlaceList: View {
     private func head(now: Date) -> some View {
         let weight = repository.weight(now: now)
         return VStack(alignment: .leading, spacing: 4) {
-            // The name and the button's label share a baseline, as a title and its toolbar button do in Mail.
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
+            // The button is centered on the title's line, the same way "Agent task" sits over the graph.
+            HStack(alignment: .center, spacing: 8) {
                 Text(repository.name)
                     .textRole(.title)
                     .fontWeight(.semibold)
@@ -236,7 +236,7 @@ private struct PlaceList: View {
                     .foregroundStyle(.tertiary)
                     .monospacedDigit()
             }
-            .textRole(.label)
+            .textRole(.secondary)
             .foregroundStyle(.secondary)
             .frame(minHeight: 24)
             .padding(.horizontal, 16)
@@ -267,8 +267,8 @@ private struct PlaceList: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .textRole(.label)
-                .foregroundStyle(.tertiary)
+                .textRole(.secondary)
+                .foregroundStyle(.secondary)
                 .frame(minHeight: 24)
                 .padding(.leading, 40)
                 .accessibilityValue(showsLeftovers ? "shown" : "hidden")
@@ -283,8 +283,8 @@ private struct PlaceList: View {
 
     private func subtitle(_ text: String) -> some View {
         Text(text)
-            .textRole(.label)
-            .foregroundStyle(.tertiary)
+            .textRole(.secondary)
+            .foregroundStyle(.secondary)
             .frame(minHeight: 24)
             .padding(.leading, 40)
     }
@@ -349,7 +349,7 @@ private struct PlaceRow: View {
                     .layoutPriority(1)
                 if place.isMainWorktree {
                     // Goes first when the row narrows: the name matters more.
-                    ViewThatFits { Text("main worktree").textRole(.label).selectableTint(.secondary); EmptyView() }
+                    ViewThatFits { Text("main worktree").textRole(.secondary).selectableTint(.secondary); EmptyView() }
                 }
                 if let piece = place.pieces.first(where: { $0.kind == .uncommitted }) {
                     if now.timeIntervalSince(piece.date) < RepositorySnapshot.liveWindow { LiveDot(date: piece.date) }
@@ -364,7 +364,7 @@ private struct PlaceRow: View {
                     .truncationMode(.tail)
                     .layoutPriority(1)
                 if let branch = stash.branch {
-                    Text("from \(branch)").textRole(.label).selectableTint(.secondary)
+                    Text("from \(branch)").textRole(.secondary).selectableTint(.secondary)
                 }
                 branchChips
             } else {
