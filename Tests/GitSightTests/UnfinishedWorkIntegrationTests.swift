@@ -27,6 +27,7 @@ enum UnfinishedWorkIntegrationTests {
         try commit("legacy-a.txt", "old\n", days: 40)
         try commit("legacy-b.txt", "old\n", days: 40)
         try commit("legacy-c.txt", "old\n", days: 40)
+        try commit("run.sh", "echo run\n", days: 40)
         try runGit(in: repositoryURL, ["remote", "add", "origin", originURL.path])
         try runGit(in: repositoryURL, ["push", "-u", "origin", "trunk"])
         // The server says which branch is the default, as a clone records it.
@@ -60,6 +61,11 @@ enum UnfinishedWorkIntegrationTests {
         try runGit(in: repositoryURL, ["rm", "-q", "legacy-c.txt"])
         try runGit(in: repositoryURL, ["commit", "-m", "Delete legacy-c.txt"], environment: daysAgo(20))
         try runGit(in: repositoryURL, ["push", "-u", "origin", "prune"])
+        // Making a script executable is work too, though not a line of it changes.
+        try runGit(in: repositoryURL, ["checkout", "-b", "executable", "trunk"])
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: repositoryURL.appendingPathComponent("run.sh").path)
+        try runGit(in: repositoryURL, ["commit", "-am", "Make run.sh executable"], environment: daysAgo(20))
+        try runGit(in: repositoryURL, ["push", "-u", "origin", "executable"])
         try runGit(in: repositoryURL, ["checkout", "trunk"])
         try runGit(in: repositoryURL, ["cherry-pick", "partial~1"], environment: daysAgo(19))
         // trunk takes the new file of cleanup but keeps the file it deleted.
@@ -85,6 +91,14 @@ enum UnfinishedWorkIntegrationTests {
         try runGit(in: repositoryURL, ["checkout", "-b", "fix", "origin/trunk"])
         try commit("fix.txt", "fix\n", days: 1)
         try runGit(in: repositoryURL, ["push", "origin", "fix"])
+        // Branches from trunk as it is now with nothing to merge: an empty commit, and a change taken back.
+        try runGit(in: repositoryURL, ["checkout", "-b", "noop", "trunk"])
+        try runGit(in: repositoryURL, ["commit", "--allow-empty", "-m", "Nothing"])
+        try runGit(in: repositoryURL, ["push", "-u", "origin", "noop"])
+        try runGit(in: repositoryURL, ["checkout", "-b", "undone", "trunk"])
+        try commit("readme.txt", "start\nmore\n", days: 1)
+        try runGit(in: repositoryURL, ["revert", "--no-edit", "HEAD"])
+        try runGit(in: repositoryURL, ["push", "-u", "origin", "undone"])
         // A site published from a branch with no history in common with trunk: never merged, never unfinished.
         try runGit(in: repositoryURL, ["checkout", "--orphan", "pages"])
         try runGit(in: repositoryURL, ["rm", "-rq", "--cached", "."])
@@ -105,6 +119,9 @@ enum UnfinishedWorkIntegrationTests {
         try expectEqual(branches["cleanup"]?.unmergedCommits, 2, "a branch whose deletion the base lacks is not merged")
         try expectEqual(branches["prune"]?.unmergedCommits, 1, "a branch that only deletes is not merged until the base deletes too")
         try expectEqual(branches["trimmed"]?.unmergedCommits, 0, "a branch squashed with its deletion is merged, though the base edited it since")
+        try expectEqual(branches["executable"]?.unmergedCommits, 1, "a branch that only makes a script executable is not merged until the base does too")
+        try expectEqual(branches["noop"]?.unmergedCommits, 0, "a branch of one empty commit has nothing to merge")
+        try expectEqual(branches["undone"]?.unmergedCommits, 0, "nor has one that took its change back")
         try expectEqual(branches["fix"]?.isBase, false, "a branch that tracks the server's trunk is not the base")
         try expectEqual(branches["fix"]?.unmergedCommits, 1, "and its work is not in the base")
         try expectEqual(branches["pages"]?.isUnrelated, true, "a branch with no history in common with the base is apart from it")
@@ -270,6 +287,56 @@ enum UnfinishedWorkIntegrationTests {
         try runGit(in: repositoryURL, ["commit", "-m", "Squash feature"])
         try runGit(in: repositoryURL, ["push", "origin", "main"])
         try expectEqual(try unmerged(), 0, "once the base squashes it in, the branch reads as merged")
+    }
+
+    /// A shallow clone cuts history where a branch and the base meet, so the branch looks apart from the
+    /// base. Deepened, with neither branch moved, the branch is read again and is unmerged work.
+    static func testDeepenedCloneIsReadAgain() throws {
+        let rootURL = scratchURL()
+        let originURL = rootURL.appendingPathComponent("origin")
+        let repositoryURL = rootURL.appendingPathComponent("repository")
+        try FileManager.default.createDirectory(at: originURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        try runGit(in: originURL, ["init", "-b", "main"])
+        try runGit(in: originURL, ["config", "user.name", "Test User"])
+        try runGit(in: originURL, ["config", "user.email", "test@example.com"])
+        try "start\n".write(to: originURL.appendingPathComponent("readme.txt"), atomically: true, encoding: .utf8)
+        try runGit(in: originURL, ["add", "readme.txt"])
+        try runGit(in: originURL, ["commit", "-m", "Start"])
+        try runGit(in: originURL, ["checkout", "-b", "feature"])
+        try "start\nfeature\n".write(to: originURL.appendingPathComponent("readme.txt"), atomically: true, encoding: .utf8)
+        try runGit(in: originURL, ["commit", "-am", "Feature"])
+        try runGit(in: originURL, ["checkout", "main"])
+        try runGit(in: rootURL, ["clone", "--depth", "1", "--no-single-branch", "file://\(originURL.path)", repositoryURL.path])
+        try runGit(in: repositoryURL, ["branch", "feature", "origin/feature"])
+        let feature = { try RepositoryInspector().inspect(repositoryAt: repositoryURL).branches.first { $0.name == "feature" } }
+        try expectEqual(try feature()?.isUnrelated, true, "cut at one commit each, the branch and the base share no history")
+
+        try runGit(in: repositoryURL, ["fetch", "--unshallow"])
+        let deepened = try feature()
+        try expectEqual(deepened?.isUnrelated, false, "deepened, they do")
+        try expectEqual(deepened?.unmergedCommits, 1, "and the branch's commit is work the base lacks")
+    }
+
+    /// A branch file written by hand may name a file's contents, not a commit. git counts nothing for it,
+    /// and the rest of the repository is read as usual.
+    static func testBranchNamingNoCommitLeavesTheRestReadable() throws {
+        let rootURL = scratchURL()
+        let repositoryURL = rootURL.appendingPathComponent("repository")
+        try FileManager.default.createDirectory(at: repositoryURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        try runGit(in: repositoryURL, ["init", "-b", "main"])
+        try runGit(in: repositoryURL, ["config", "user.name", "Test User"])
+        try runGit(in: repositoryURL, ["config", "user.email", "test@example.com"])
+        try "start\n".write(to: repositoryURL.appendingPathComponent("readme.txt"), atomically: true, encoding: .utf8)
+        try runGit(in: repositoryURL, ["add", "readme.txt"])
+        try runGit(in: repositoryURL, ["commit", "-m", "Start"])
+        let blob = try CommitTopologyIntegrationTests.gitOutput(in: repositoryURL, ["hash-object", "-w", "readme.txt"])
+        try "\(blob)\n".write(to: repositoryURL.appendingPathComponent(".git/refs/heads/odd"), atomically: false, encoding: .utf8)
+
+        let snapshot = try RepositoryInspector().inspect(repositoryAt: repositoryURL)
+        try expectEqual(snapshot.branches.map(\.name), ["main", "odd"], "every branch is listed")
+        try expectEqual(snapshot.branches.first { $0.name == "odd" }?.unmergedCommits, 0, "a branch that names no commit holds no work")
     }
 
     private static func scratchURL() -> URL {

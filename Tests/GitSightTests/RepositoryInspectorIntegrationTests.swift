@@ -119,6 +119,8 @@ enum RepositoryInspectorIntegrationTests {
             ("partial clones fetch nothing", UnfinishedWorkIntegrationTests.testPartialClonesFetchNothing),
             ("branches in use are not leftovers", UnfinishedWorkIntegrationTests.testBranchesInUseAreNotLeftovers),
             ("merge is read again when the base moves", UnfinishedWorkIntegrationTests.testMergeIsReadAgainWhenTheBaseMoves),
+            ("a clone deepened later is read again", UnfinishedWorkIntegrationTests.testDeepenedCloneIsReadAgain),
+            ("a branch naming no commit leaves the rest readable", UnfinishedWorkIntegrationTests.testBranchNamingNoCommitLeavesTheRestReadable),
             ("diffs show what changed line by line", FileDiffIntegrationTests.testDiffsShowWhatChangedLineByLine),
             ("random histories draw without crossings", CommitTopologyIntegrationTests.testRandomHistoriesDrawWithoutCrossings),
             ("uncommitted and stashed files are listed", ChangedFilesIntegrationTests.testReportsUncommittedAndStashedFiles),
