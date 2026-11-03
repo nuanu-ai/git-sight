@@ -283,4 +283,45 @@ enum CommitTopologyIntegrationTests {
         guard process.terminationStatus == 0 else { throw NSError(domain: "gitOutput", code: Int(process.terminationStatus)) }
         return String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
     }
+
+    static func testCommitsNameTheirBranchesAndTags() throws {
+        let rootURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent(".build/GitSightTests/\(UUID().uuidString)", isDirectory: true)
+        let originURL = rootURL.appendingPathComponent("origin.git")
+        let repositoryURL = rootURL.appendingPathComponent("repository")
+        try FileManager.default.createDirectory(at: repositoryURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        try runGit(in: rootURL, ["init", "--bare", originURL.path])
+        try runGit(in: repositoryURL, ["init", "-b", "main"])
+        try runGit(in: repositoryURL, ["config", "user.name", "Test User"])
+        try runGit(in: repositoryURL, ["config", "user.email", "test@example.com"])
+        try runGit(in: repositoryURL, ["commit", "--allow-empty", "-m", "Released"])
+        try runGit(in: repositoryURL, ["tag", "v1.0"])
+        try runGit(in: repositoryURL, ["remote", "add", "origin", originURL.path])
+        try runGit(in: repositoryURL, ["push", "-u", "origin", "main"])
+        try runGit(in: repositoryURL, ["checkout", "-b", "feature"])
+        try runGit(in: repositoryURL, ["commit", "--allow-empty", "-m", "Feature"])
+        // A branch named like a remote's branch is still a local branch.
+        try runGit(in: repositoryURL, ["branch", "origin/look-alike", "main"])
+
+        let history = try RepositoryInspector().history(in: repositoryURL, revisions: ["--all"])
+        try expectEqual(Set(history.first { $0.subject == "Feature" }?.refs ?? []), [CommitRef(kind: .branch, name: "feature", isHead: true)], "the checked-out branch is marked as HEAD")
+        try expectEqual(
+            Set(history.first { $0.subject == "Released" }?.refs ?? []),
+            [
+                CommitRef(kind: .branch, name: "main"),
+                CommitRef(kind: .branch, name: "origin/look-alike"),
+                CommitRef(kind: .remoteBranch, name: "origin/main"),
+                CommitRef(kind: .tag, name: "v1.0")
+            ],
+            "local branches, remote branches and tags are told apart by their full names"
+        )
+
+        try runGit(in: repositoryURL, ["checkout", "--detach", "main"])
+        let detached = try RepositoryInspector().history(in: repositoryURL, revisions: ["--all"])
+        try expectEqual(detached.first { $0.subject == "Released" }?.refs.filter { $0.kind == .head }, [CommitRef(kind: .head, name: "HEAD", isHead: true)], "a detached HEAD is named on its commit")
+    }
 }

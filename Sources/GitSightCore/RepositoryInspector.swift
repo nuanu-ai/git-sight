@@ -109,7 +109,7 @@ public struct RepositoryInspector {
                 author: fields[4],
                 date: date,
                 parents: fields[6].split(whereSeparator: \.isWhitespace).map(String.init),
-                refs: fields[7].split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) },
+                refs: Self.refs(fields[7]),
                 lane: 0,
                 isBoundary: fields[0] == "-"
             )
@@ -119,6 +119,10 @@ public struct RepositoryInspector {
             commits.removeAll(where: \.isBoundary)
         }
         return Self.laidOut(commits)
+    }
+
+    static func refs(_ decoration: String) -> [CommitRef] {
+        []
     }
 
     private func nameStatus(in repositoryURL: URL, _ arguments: [String]) throws -> [CommitFileSnapshot] {
