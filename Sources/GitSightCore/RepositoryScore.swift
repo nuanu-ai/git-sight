@@ -51,3 +51,18 @@ enum RepositoryScore {
         return (severity, work.map(\.date).min())
     }
 }
+
+/// A piece of work that exists only on this machine.
+public enum UnsavedWork: Equatable {
+    case uncommitted
+    /// Commits on no remote; `upstreamGone` when the branch's upstream was deleted on the server.
+    case commits(upstreamGone: Bool)
+    case stash
+}
+
+extension Severity {
+    /// How bad one piece of unsaved work is, by how long it has been left alone.
+    public init(of work: UnsavedWork, lastChanged: Date, now: Date = Date()) {
+        self = .attention
+    }
+}

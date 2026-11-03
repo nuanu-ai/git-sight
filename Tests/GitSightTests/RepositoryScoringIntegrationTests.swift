@@ -2,6 +2,16 @@ import Foundation
 import GitSightCore
 
 enum RepositoryScoringIntegrationTests {
+    static func testEachPieceOfWorkHasItsOwnVerdict() throws {
+        let now = Date()
+        func daysAgo(_ days: Double) -> Date { now.addingTimeInterval(-days * 24 * 60 * 60) }
+        try expectEqual(Severity(of: .uncommitted, lastChanged: daysAgo(2), now: now), .attention, "uncommitted work from two days ago is in progress")
+        try expectEqual(Severity(of: .uncommitted, lastChanged: daysAgo(4), now: now), .warning, "uncommitted work left for four days is abandoned")
+        try expectEqual(Severity(of: .stash, lastChanged: daysAgo(2), now: now), .warning, "a stash is abandoned after a day")
+        try expectEqual(Severity(of: .commits(upstreamGone: false), lastChanged: daysAgo(40), now: now), .critical, "unpushed commits left for over a month are forgotten")
+        try expectEqual(Severity(of: .commits(upstreamGone: true), lastChanged: daysAgo(40), now: now), .attention, "a branch deleted on the server stays a notice however old")
+    }
+
     static func testPushedAndMergedBranchesAreNotRisk() throws {
         let fixture = try makeRepository()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
