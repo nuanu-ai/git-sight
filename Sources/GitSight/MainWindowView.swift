@@ -235,7 +235,7 @@ private struct RepositoryRow: View {
     var body: some View {
         HStack(spacing: SidebarGrid.gap) {
             Circle()
-                .fill(repository.severity.color)
+                .selectableTint(repository.severity.color)
                 .frame(width: 7, height: 7)
                 .frame(width: SidebarGrid.marker)
                 .accessibilityHidden(true)
@@ -254,7 +254,7 @@ private struct RepositoryRow: View {
                     .textRole(.secondary)
                     .fontWeight(repository.severity >= .warning ? .semibold : .regular)
                     .monospacedDigit()
-                    .foregroundStyle(repository.severity.tint)
+                    .selectableTint(repository.severity.tint)
             }
         }
         .padding(.vertical, 2)
@@ -345,6 +345,23 @@ private struct SeverityBadge: View {
 
 
 
+/// A severity color that turns white on a selected row, as macOS does in Mail and Finder:
+/// red or orange on the selection's blue is hard to read and rough on the eye at the edges.
+private struct SelectableTint: ViewModifier {
+    @Environment(\.backgroundProminence) private var prominence
+    let color: Color
+
+    func body(content: Content) -> some View {
+        content.foregroundStyle(prominence == .increased ? Color.white : color)
+    }
+}
+
+extension View {
+    fileprivate func selectableTint(_ color: Color) -> some View {
+        modifier(SelectableTint(color: color))
+    }
+}
+
 /// The columns every sidebar row shares, headers included, so nothing drifts between them.
 enum SidebarGrid {
     /// The leading column: a repository's dot, a group's chevron.
@@ -403,7 +420,7 @@ private struct FindingRow: View {
             Color.clear.frame(width: SidebarGrid.marker, height: 1)
             HStack(spacing: 6) {
                 Image(systemName: finding.systemImage)
-                    .foregroundStyle(finding.severity.tint)
+                    .selectableTint(finding.severity.tint)
                     .frame(width: 18)
                     .accessibilityHidden(true)
                 // The name alone repeats: a worktree on main and the branch main are both "main".
@@ -417,7 +434,7 @@ private struct FindingRow: View {
                 .textRole(.secondary)
                 .fontWeight(finding.severity >= .warning ? .semibold : .regular)
                 .monospacedDigit()
-                .foregroundStyle(finding.severity.tint)
+                .selectableTint(finding.severity.tint)
         }
         .help([finding.title, finding.detail, finding.note].compactMap { $0 }.joined(separator: "\n"))
     }
