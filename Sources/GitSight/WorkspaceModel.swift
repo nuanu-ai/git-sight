@@ -317,8 +317,16 @@ final class WorkspaceModel {
         commitFiles = nil
         commitFilesError = nil
         guard case .history(let commits) = findingContent,
-              let commit = commits.first(where: { $0.fullHash == selectedCommitHash }),
-              case .history(let directory, _) = selectedFinding?.source else { return }
+              let commit = commits.first(where: { $0.fullHash == selectedCommitHash }) else { return }
+        // "Все ветки" has no finding; its commits live in the repository itself.
+        let directory: URL
+        if case .history(let findingDirectory, _) = selectedFinding?.source {
+            directory = findingDirectory
+        } else if showsGraph, let repository = selectedRepository {
+            directory = repository.path
+        } else {
+            return
+        }
         let hash = commit.fullHash
         let worker = Task.detached(priority: .userInitiated) {
             try RepositoryInspector().changedFiles(in: directory, commit: commit)

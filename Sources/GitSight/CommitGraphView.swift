@@ -171,6 +171,11 @@ struct CommitGraph: View {
         12 + CGFloat(max(0, lane)) * laneSpacing
     }
 
+    /// Text on a lane's color: dark on the light amber and teal, white on the rest.
+    static func labelColor(on lane: Color) -> Color {
+        lane == laneColors[1] || lane == laneColors[3] ? Color.black.opacity(0.85) : .white
+    }
+
     private func color(lane: Int) -> Color {
         Self.laneColors[max(0, lane) % Self.laneColors.count]
     }
@@ -189,27 +194,43 @@ private struct CommitRow: View {
                 .foregroundStyle(commit.isBoundary ? .secondary : .primary)
                 .lineLimit(1)
                 .truncationMode(.tail)
-                .layoutPriority(1)
-            ForEach(commit.refs, id: \.self) { ref in
-                RefBadge(ref: ref, color: laneColor)
+                .frame(minWidth: 120, alignment: .leading)
+            // Labels stay whole: three, then one, then only the count, as the column narrows.
+            ViewThatFits(in: .horizontal) {
+                labels(shown: 3)
+                labels(shown: 1)
+                labels(shown: 0)
             }
-            if commit.isUnpushed {
-                Image(systemName: "icloud.slash")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-                    .help("Этого коммита нет на сервере")
-                    .accessibilityLabel("нет на сервере")
-            }
+            .layoutPriority(1)
             Spacer(minLength: 0)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 6)
         .frame(maxHeight: .infinity)
         .background(
+            // Work that exists only on this machine reads as a band, the way the server's history does not.
             RoundedRectangle(cornerRadius: 4)
-                .fill(isSelected ? Color.accentColor.opacity(0.18) : .clear)
+                .fill(isSelected ? Color.accentColor.opacity(0.18) : commit.isUnpushed ? Color.orange.opacity(0.12) : .clear)
         )
+        .accessibilityValue(commit.isUnpushed ? "нет на сервере" : "")
         .padding(.trailing, 8)
-        .help("\(commit.subject)\n\(commit.shortHash) · \(commit.author) · \(RepositoryText.fullDate(commit.date)), \(RepositoryText.ago(commit.date))")
+        .help("\(commit.subject)\n\(commit.shortHash) · \(commit.author) · \(RepositoryText.fullDate(commit.date)), \(RepositoryText.ago(commit.date))"
+              + (commit.isUnpushed ? "\nЭтого коммита нет на сервере" : ""))
+    }
+
+    private func labels(shown: Int) -> some View {
+        HStack(spacing: 4) {
+            ForEach(commit.refs.prefix(shown), id: \.self) { ref in
+                RefBadge(ref: ref, color: laneColor)
+            }
+            if commit.refs.count > shown {
+                Text(shown == 0 ? RepositoryText.counted(commit.refs.count, one: "метка", few: "метки", many: "меток") : "+\(commit.refs.count - shown)")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .help(commit.refs.dropFirst(shown).map(\.name).joined(separator: "\n"))
+            }
+        }
+        .fixedSize()
     }
 }
 
@@ -230,7 +251,7 @@ private struct RefBadge: View {
         }
         .padding(.horizontal, 5)
         .padding(.vertical, 1)
-        .foregroundStyle(isLocal ? Color.white : Color.secondary)
+        .foregroundStyle(isLocal ? CommitGraph.labelColor(on: color) : Color.secondary)
         .background(Capsule().fill(isLocal ? color : Color.secondary.opacity(0.18)))
         .fixedSize()
         .help(help)

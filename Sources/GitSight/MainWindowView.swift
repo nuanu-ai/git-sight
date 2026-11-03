@@ -529,15 +529,32 @@ private struct GraphHeader: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .textSelection(.enabled)
-            HStack(spacing: 8) {
-                Button("Показать в Finder") { Workspace.reveal(repository.path) }
-                Button("Открыть в Терминале") { Workspace.openTerminal(at: repository.path) }
+            // Labels turn into icons as the column narrows, as in the finding header.
+            ViewThatFits(in: .horizontal) {
+                actions(iconsOnly: false)
+                actions(iconsOnly: true)
             }
-            .controlSize(.large)
             .padding(.top, 6)
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+extension GraphHeader {
+    fileprivate func actions(iconsOnly: Bool) -> some View {
+        HStack(spacing: 8) {
+            Button { Workspace.reveal(repository.path) } label: {
+                if iconsOnly { Image(systemName: "folder") } else { Text("Показать в Finder") }
+            }
+            .help("Показать в Finder")
+            Button { Workspace.openTerminal(at: repository.path) } label: {
+                if iconsOnly { Image(systemName: "terminal") } else { Text("Открыть в Терминале") }
+            }
+            .help("Открыть в Терминале")
+        }
+        .controlSize(.large)
+        .fixedSize()
     }
 }
 
