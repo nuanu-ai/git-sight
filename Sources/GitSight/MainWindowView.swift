@@ -261,51 +261,44 @@ private struct RepositoryActions: View {
 private struct SidebarFooter: View {
     @Bindable var model: WorkspaceModel
 
+    // Fixed lines, not a fit test: in the sidebar the footer is drawn narrower than it is offered,
+    // so a one-line layout that "fits" got squeezed and its words wrapped letter by letter.
+    // Only the folder shrinks; everything else keeps its width on a line of its own.
     var body: some View {
-        // One line while everything fits. Then the folder gets a line of its own, shrinking in the middle,
-        // and then the time too, so nothing wraps mid-word.
-        ViewThatFits(in: .horizontal) {
+        VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
                 folder
                 Spacer(minLength: 8)
-                problems
-                updated
-            }
-            VStack(alignment: .leading, spacing: 4) {
-                folder
-                // Measured on its own: the folder's full length must not push the time onto a third line.
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 12) {
-                        problems
-                        updated
-                    }
-                    VStack(alignment: .leading, spacing: 4) {
-                        problems
-                        updated
-                    }
+                if let lastScanDate = model.lastScanDate {
+                    Text("Updated \(lastScanDate.formatted(date: .omitted, time: .shortened))")
+                        .fixedSize()
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            if let errorMessage = model.errorMessage {
+                // The list above is from the last scan that worked.
+                Label("Couldn't refresh", systemImage: "exclamationmark.triangle")
+                    .fixedSize()
+                    .foregroundStyle(.orange)
+                    .help(errorMessage)
+            }
+            if !model.scanFailures.isEmpty {
+                Button {
+                    model.showsScanFailures.toggle()
+                } label: {
+                    Label("Couldn't read \(model.scanFailures.count)", systemImage: "exclamationmark.triangle")
+                        .fixedSize()
+                }
+                .buttonStyle(.borderless)
+                .help("Folders that look like repositories but git couldn't read. Click for the reasons")
+                .popover(isPresented: $model.showsScanFailures, arrowEdge: .top) {
+                    ScanFailures(failures: model.scanFailures)
+                }
+            }
         }
         .textRole(.secondary)
         .foregroundStyle(.secondary)
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .popover(isPresented: $model.showsScanFailures) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    ForEach(model.scanFailures, id: \.path) { failure in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(RepositoryText.path(failure.path)).fontWeight(.medium)
-                            Text(failure.message).textRole(.secondary).foregroundStyle(.secondary)
-                        }
-                        .textSelection(.enabled)
-                    }
-                }
-                .padding(16)
-            }
-            .frame(width: 420, height: 260)
-        }
     }
 
     /// Here, not in the toolbar: it is set once, and a long path has room to shrink in the middle.
@@ -321,35 +314,42 @@ private struct SidebarFooter: View {
             .help("The folder to look for repositories in. Click to choose another (⌘O)")
         }
     }
+}
 
-    /// What went wrong in the last scan; each keeps to one line.
-    @ViewBuilder
-    private var problems: some View {
-        if let errorMessage = model.errorMessage {
-            // The list above is from the last scan that worked.
-            Label("Couldn't refresh", systemImage: "exclamationmark.triangle")
-                .foregroundStyle(.orange)
-                .fixedSize()
-                .help(errorMessage)
-        }
-        if !model.scanFailures.isEmpty {
-            Button {
-                model.showsScanFailures.toggle()
-            } label: {
-                Label("Couldn't read \(model.scanFailures.count)", systemImage: "exclamationmark.triangle")
-            }
-            .buttonStyle(.borderless)
-            .fixedSize()
-            .help("Repositories that couldn't be read. Click for the reasons")
+/// Why each folder couldn't be read: as tall as a few reasons need, scrolling past that.
+private struct ScanFailures: View {
+    let failures: [RepositoryScanFailure]
+
+    var body: some View {
+        if failures.count <= 5 {
+            list
+        } else {
+            ScrollView { list }
+                .frame(height: 360)
         }
     }
 
-    @ViewBuilder
-    private var updated: some View {
-        if let lastScanDate = model.lastScanDate {
-            Text("Updated \(lastScanDate.formatted(date: .omitted, time: .shortened))")
-                .fixedSize()
+    private var list: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ForEach(failures, id: \.path) { failure in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(RepositoryText.path(failure.path))
+                        .fontWeight(.medium)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if failure.message.contains("not a git repository") {
+                        Text("Git doesn't see a repository here. The .git folder is damaged, or it is a file pointing to a repository that moved or was deleted.")
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Text(failure.message)
+                        .textRole(.secondary)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .textSelection(.enabled)
+            }
         }
+        .padding(16)
+        .frame(width: 420, alignment: .leading)
     }
 }
 
