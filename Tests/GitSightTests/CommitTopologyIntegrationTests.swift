@@ -328,4 +328,57 @@ enum CommitTopologyIntegrationTests {
         let detached = try RepositoryInspector().history(in: repositoryURL, revisions: ["--all"])
         try expectEqual(detached.first { $0.subject == "Released" }?.refs.filter { $0.kind == .head }, [CommitRef(kind: .head, name: "HEAD", isHead: true)], "a detached HEAD is named on its commit")
     }
+
+    static func testRepositoryHistoryShowsEveryBranchAndWhatIsNotOnTheServer() throws {
+        let rootURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent(".build/GitSightTests/\(UUID().uuidString)", isDirectory: true)
+        let originURL = rootURL.appendingPathComponent("origin.git")
+        let repositoryURL = rootURL.appendingPathComponent("repository")
+        try FileManager.default.createDirectory(at: repositoryURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        try runGit(in: rootURL, ["init", "--bare", originURL.path])
+        try runGit(in: repositoryURL, ["init", "-b", "main"])
+        try runGit(in: repositoryURL, ["config", "user.name", "Test User"])
+        try runGit(in: repositoryURL, ["config", "user.email", "test@example.com"])
+        try runGit(in: repositoryURL, ["commit", "--allow-empty", "-m", "Pushed"])
+        try runGit(in: repositoryURL, ["remote", "add", "origin", originURL.path])
+        try runGit(in: repositoryURL, ["push", "-u", "origin", "main"])
+        // A colleague's branch that exists only on the server.
+        try runGit(in: repositoryURL, ["checkout", "-b", "colleague"])
+        try runGit(in: repositoryURL, ["commit", "--allow-empty", "-m", "Colleague"])
+        try runGit(in: repositoryURL, ["push", "origin", "colleague"])
+        try runGit(in: repositoryURL, ["checkout", "main"])
+        try runGit(in: repositoryURL, ["branch", "-D", "colleague"])
+        try runGit(in: repositoryURL, ["checkout", "-b", "feature"])
+        try runGit(in: repositoryURL, ["commit", "--allow-empty", "-m", "Local feature"])
+        try runGit(in: repositoryURL, ["checkout", "main"])
+        let worktreeURL = rootURL.appendingPathComponent("agent-worktree")
+        try runGit(in: repositoryURL, ["worktree", "add", "--detach", worktreeURL.path])
+        try runGit(in: worktreeURL, ["commit", "--allow-empty", "-m", "Agent work"])
+        try "draft\n".write(to: repositoryURL.appendingPathComponent("draft.txt"), atomically: true, encoding: .utf8)
+        try runGit(in: repositoryURL, ["stash", "push", "--include-untracked", "-m", "parked"])
+
+        let history = try RepositoryInspector().repositoryHistory(in: repositoryURL)
+        try expectEqual(Set(history.map(\.subject)), ["Pushed", "Colleague", "Local feature", "Agent work"], "every branch, remote branch and worktree is in the graph, and stashes are not")
+        try expectEqual(
+            Set(history.filter(\.isUnpushed).map(\.subject)),
+            ["Local feature", "Agent work"],
+            "commits on no remote branch are marked, including a detached worktree's"
+        )
+        try expectEqual(
+            history.first { $0.subject == "Agent work" }?.refs,
+            [CommitRef(kind: .worktree, name: "agent-worktree")],
+            "a detached worktree is named on its commit"
+        )
+        try expectEqual(history.filter(\.isBoundary), [], "a whole repository has no range to stop at")
+
+        let localURL = rootURL.appendingPathComponent("local")
+        try FileManager.default.createDirectory(at: localURL, withIntermediateDirectories: true)
+        try runGit(in: localURL, ["init", "-b", "main"])
+        try runGit(in: localURL, ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-m", "Only here"])
+        try expectEqual(try RepositoryInspector().repositoryHistory(in: localURL).filter(\.isUnpushed), [], "without a remote nothing is marked, since nothing could be pushed")
+    }
 }

@@ -121,6 +121,11 @@ public struct RepositoryInspector {
         return Self.laidOut(commits)
     }
 
+    /// Every branch, remote branch and tag, and linked worktrees on no branch, as one graph.
+    public func repositoryHistory(in repositoryURL: URL) throws -> [CommitSnapshot] {
+        []
+    }
+
     /// Reads %D written with --decorate=full, e.g. "HEAD -> refs/heads/main, refs/remotes/origin/main, tag: refs/tags/v1".
     static func refs(_ decoration: String) -> [CommitRef] {
         decoration.split(separator: ",").compactMap { part in
