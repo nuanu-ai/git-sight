@@ -105,7 +105,8 @@ enum RepositoryInspectorIntegrationTests {
             ("history ends where work left the server", CommitTopologyIntegrationTests.testHistoryEndsWhereWorkLeftTheServer),
             ("cut-off history does not claim the server has it", CommitTopologyIntegrationTests.testCutOffHistoryDoesNotClaimTheServerHasIt),
             ("history reads revisions shadowed by file names", CommitTopologyIntegrationTests.testHistoryReadsRevisionsShadowedByFileNames),
-            ("uncommitted and stashed files are listed", ChangedFilesIntegrationTests.testReportsUncommittedAndStashedFiles)
+            ("uncommitted and stashed files are listed", ChangedFilesIntegrationTests.testReportsUncommittedAndStashedFiles),
+            ("stash keeps its files when another is pushed", ChangedFilesIntegrationTests.testStashKeepsItsFilesWhenAnotherIsPushed)
         ] {
             await run(name: name, test, failures: &failures)
         }

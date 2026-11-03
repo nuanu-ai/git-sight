@@ -262,7 +262,7 @@ public struct RepositoryInspector {
         return try Self.records(output).map { record in
             let fields = Self.fields(record)
             guard fields.count >= 3, let date = Self.date(from: fields[2]) else { throw Self.parseError(record) }
-            return StashSnapshot(name: fields[0], message: fields[1], date: date)
+            return StashSnapshot(name: fields[0], hash: fields[0], message: fields[1], date: date)
         }
     }
 

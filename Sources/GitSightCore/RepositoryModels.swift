@@ -84,11 +84,14 @@ public struct BranchSnapshot: Equatable {
 
 public struct StashSnapshot: Equatable {
     public let name: String
+    /// Unlike `name`, stays with this stash when another one is pushed.
+    public let hash: String
     public let message: String
     public let date: Date
 
-    public init(name: String, message: String, date: Date) {
+    public init(name: String, hash: String, message: String, date: Date) {
         self.name = name
+        self.hash = hash
         self.message = message
         self.date = date
     }

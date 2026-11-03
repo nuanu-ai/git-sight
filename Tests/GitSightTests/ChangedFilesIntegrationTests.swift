@@ -75,4 +75,35 @@ enum ChangedFilesIntegrationTests {
             "a stash lists the tracked and untracked files it holds"
         )
     }
+
+    static func testStashKeepsItsFilesWhenAnotherIsPushed() throws {
+        let repositoryURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent(".build/GitSightTests/\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: repositoryURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: repositoryURL) }
+        try runGit(in: repositoryURL, ["init", "-b", "main"])
+        try runGit(in: repositoryURL, ["config", "user.name", "Test User"])
+        try runGit(in: repositoryURL, ["config", "user.email", "test@example.com"])
+        for name in ["first.txt", "second.txt"] {
+            try "before\n".write(to: repositoryURL.appendingPathComponent(name), atomically: true, encoding: .utf8)
+        }
+        try runGit(in: repositoryURL, ["add", "."])
+        try runGit(in: repositoryURL, ["commit", "-m", "Initial"])
+        try "after\n".write(to: repositoryURL.appendingPathComponent("first.txt"), atomically: true, encoding: .utf8)
+        try runGit(in: repositoryURL, ["stash", "push", "-m", "first"])
+
+        let inspector = RepositoryInspector()
+        let stash = try inspector.inspect(repositoryAt: repositoryURL).stashes.first
+        try "after\n".write(to: repositoryURL.appendingPathComponent("second.txt"), atomically: true, encoding: .utf8)
+        try runGit(in: repositoryURL, ["stash", "push", "-m", "second"])
+
+        try expectEqual(
+            try inspector.stashFiles(in: repositoryURL, stash: stash?.hash ?? "").map(\.path),
+            ["first.txt"],
+            "a stash read from an earlier scan still shows its own files after a new stash is pushed"
+        )
+    }
 }
