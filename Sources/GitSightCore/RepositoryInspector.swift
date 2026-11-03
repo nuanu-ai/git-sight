@@ -425,7 +425,7 @@ public struct RepositoryInspector {
     }
 
     /// Whether a branch's changes are all in the base already, as after a squash merge: every file the
-    /// branch changed since it left the base reads the same in the base. Only reads, unlike a trial merge,
+    /// branch changed or deleted since it left the base reads the same in the base. Only reads, unlike a trial merge,
     /// which writes objects. A branch that touched over a thousand files, or one git cannot compare,
     /// as in a partial clone missing the trees, is left as not merged.
     private func isSquashed(_ branch: String, since mergeBase: String, into base: String, in repositoryURL: URL) -> Bool {
@@ -440,9 +440,11 @@ public struct RepositoryInspector {
             held[change.path] = change.oldBlob
             wanted[change.path] = change.newBlob
         }
-        guard !wanted.isEmpty else { return true }
-        guard wanted.count <= 1000 else { return false }
-        let pathspec = ["--"] + wanted.keys.map { ":(literal)\($0)" }
+        // A deleted file is in held only, a new one in wanted only.
+        let paths = Set(held.keys).union(wanted.keys)
+        guard !paths.isEmpty else { return true }
+        guard paths.count <= 1000 else { return false }
+        let pathspec = ["--"] + paths.map { ":(literal)\($0)" }
         if (try? git.run(in: repositoryURL, ["diff-tree", "--quiet", "-r", base, branch] + pathspec))?.status == 0 { return true }
         // The base may have edited those files again since. Then, walking its own line of commits from where
         // the branch left, one commit held every file as the branch left it.
