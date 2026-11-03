@@ -22,7 +22,7 @@ Each piece gets a verdict by how long it has gone untouched:
 | В работе | fresh work, or a repository with no remote at all |
 | Чисто | everything is on the server |
 
-A branch whose upstream was deleted on the server stays "В работе" however old it is. That is what a squash merge leaves behind, and git cannot tell it apart from lost work. A repository is as bad as its worst piece of work.
+A branch whose upstream was deleted on the server is most likely merged: a squash merge leaves exactly that, and git cannot tell it apart from lost work. It stays "В работе" for two weeks, then turns "Заброшено" as leftover to clean up, and never "Забыто". A repository is as bad as its worst piece of work.
 
 ## Using it
 

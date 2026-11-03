@@ -4,6 +4,8 @@ enum RepositoryScore {
     static let abandonedAge: TimeInterval = 3 * 24 * 60 * 60
     static let abandonedStashAge: TimeInterval = 24 * 60 * 60
     static let criticalAge: TimeInterval = 30 * 24 * 60 * 60
+    /// A branch deleted on the server is most likely merged: a notice for two weeks, then leftover.
+    static let goneUpstreamAge: TimeInterval = 14 * 24 * 60 * 60
 
     /// Rates work that exists only on this machine by how long it has been left alone.
     static func evaluate(
@@ -55,15 +57,15 @@ extension Severity {
             abandonedAfter = RepositoryScore.abandonedAge
         case .commits(upstreamGone: true):
             // Squash merges leave exactly this: commits on no remote, upstream deleted.
-            // Reachability cannot tell that from lost work, so it stays a notice.
-            abandonedAfter = .infinity
+            // Reachability cannot tell that from lost work, so it never becomes critical.
+            abandonedAfter = RepositoryScore.goneUpstreamAge
         case .stash:
             abandonedAfter = RepositoryScore.abandonedStashAge
         }
         let age = now.timeIntervalSince(lastChanged)
         if age <= abandonedAfter {
             self = .attention
-        } else if age > RepositoryScore.criticalAge {
+        } else if age > RepositoryScore.criticalAge, work != .commits(upstreamGone: true) {
             self = .critical
         } else {
             self = .warning
