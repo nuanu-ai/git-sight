@@ -92,7 +92,7 @@ enum CommitTopologyIntegrationTests {
         let base = history.first { $0.subject == "Initial" }
         try expectEqual(side?.lane, 1, "second merge parent starts on lane 1")
         try expectEqual(main?.lane, 0, "first merge parent remains on lane 0")
-        try expectEqual(base?.lane, side?.lane, "unrelated first-parent processing cannot move the side branch")
+        try expectEqual(base?.lane, main?.lane, "the shared root continues the first-parent line, and the side line joins it")
     }
 
     static func testHistoryEndsWhereWorkLeftTheServer() throws {
