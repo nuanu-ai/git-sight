@@ -170,7 +170,8 @@ struct RepositorySidebar: View {
         Binding {
             model.selectedFindingID
         } set: { id in
-            guard let id else { return }
+            guard let id, id != model.selectedFindingID else { return }
+            model.selectionJustChanged = true
             if let repository = model.repositories.first(where: { WorkspaceModel.graphID(of: $0) == id }) {
                 model.selectedPath = repository.path
             }
@@ -178,11 +179,21 @@ struct RepositorySidebar: View {
         }
     }
 
+    /// The list selects a row as the click lands; a click on the row already selected folds or unfolds its findings.
+    private func secondClick(on repository: RepositorySnapshot) {
+        guard repository.path == model.selectedPath else { return }
+        if model.selectionJustChanged {
+            model.selectionJustChanged = false
+        } else {
+            withAnimation(.snappy(duration: 0.2)) { model.foldsFindings.toggle() }
+        }
+    }
+
     /// The selected repository's work, folded out under its row: uncommitted, local commits, stashes,
     /// then what the server has but the base does not, then leftovers.
     @ViewBuilder
     private func findings(of repository: RepositorySnapshot) -> some View {
-        if repository.path == model.selectedPath {
+        if repository.path == model.selectedPath, !model.foldsFindings {
             let order: [Finding.Kind] = [.uncommitted, .branch, .detached, .stash, .unmerged, .leftover]
             ForEach(repository.findings.sorted { order.firstIndex(of: $0.kind) ?? 0 < order.firstIndex(of: $1.kind) ?? 0 }) { finding in
                 FindingRow(finding: finding)
@@ -207,6 +218,7 @@ struct RepositorySidebar: View {
                 if isExpanded("now") {
                     ForEach(active, id: \.0.path) { repository, change in
                         RepositoryRow(repository: repository, activity: change)
+                            .simultaneousGesture(TapGesture().onEnded { secondClick(on: repository) })
                         findings(of: repository)
                     }
                 }
@@ -219,6 +231,7 @@ struct RepositorySidebar: View {
                     if isExpanded(key) {
                         ForEach(group, id: \.path) { repository in
                             RepositoryRow(repository: repository)
+                                .simultaneousGesture(TapGesture().onEnded { secondClick(on: repository) })
                             findings(of: repository)
                         }
                     }
@@ -338,7 +351,7 @@ private struct SeverityBadge: View {
         Text(finding.badge.title)
             .textRole(.secondary)
             .fontWeight(.semibold)
-            .foregroundStyle(finding.badge.color == Severity.attention.color ? Color.black.opacity(0.8) : .white)
+            .foregroundStyle(finding.badge.color.badgeText)
             .padding(.horizontal, 8)
             .padding(.vertical, 2)
             .background(Capsule().fill(finding.badge.color))
@@ -398,7 +411,7 @@ private struct SidebarHeader: View {
                     .textRole(.label)
                     .fontWeight(.semibold)
                     .monospacedDigit()
-                    .foregroundStyle(color == Severity.attention.color ? Color.black.opacity(0.8) : .white)
+                    .foregroundStyle(color.badgeText)
                     .padding(.horizontal, 7)
                     .background(Capsule().fill(color))
             }

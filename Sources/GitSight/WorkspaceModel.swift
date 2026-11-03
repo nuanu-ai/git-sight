@@ -36,9 +36,15 @@ final class WorkspaceModel {
         didSet {
             guard selectedPath != oldValue else { return }
             // A repository opens on its graph; its findings sit right under it in the sidebar.
+            foldsFindings = false
             selectedFindingID = selectedRepository.map(Self.graphID)
         }
     }
+    /// A second click on the selected repository folds its findings away; the next one brings them back.
+    var foldsFindings = false
+    /// The click that selects a row is not the second click on it.
+    var selectionJustChanged = false
+
     var selectedFindingID: String? {
         didSet {
             guard selectedFindingID != oldValue else { return }

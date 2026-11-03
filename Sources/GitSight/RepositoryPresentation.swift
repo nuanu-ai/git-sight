@@ -69,6 +69,13 @@ enum RepositoryText {
     }
 }
 
+extension Color {
+    /// Text on a filled badge: dark on the light yellow and green, where white does not read.
+    var badgeText: Color {
+        self == .yellow || self == .green ? Color.black.opacity(0.8) : .white
+    }
+}
+
 extension Severity {
     var color: Color {
         switch self {
