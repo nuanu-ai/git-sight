@@ -1,74 +1,63 @@
-# git-sight
+<p align="center">
+  <img src="Resources/AppIcon.png" width="128" height="128" alt="">
+</p>
 
-A native macOS app that finds work you left behind in your git repositories: branches you never pushed, stashes you forgot, uncommitted edits, commits stranded in a worktree an agent created and abandoned.
+<h1 align="center">git-sight</h1>
 
-It never changes a repository. When something needs fixing, copy a ready-made task for your coding agent and let it do the work.
+<p align="center">
+  See the work your agents left behind, in every repository at once.<br>
+  A native macOS app. Read-only by design.
+</p>
 
-## What counts as left behind
+Run a few coding agents for a week and your disk fills with branches nobody pushed, stashes nobody remembers, worktrees an agent created and walked away from. git does not tell you any of this unless you go into each repository and ask.
 
-git-sight looks for work that exists only on this machine:
+git-sight asks for you. Point it at the folder with your repositories and it shows, on one screen, whether there is unfinished work, where it is, and how long it has been sitting there.
 
-- uncommitted files in any worktree, dated by the newest file change;
-- local branches with commits that no remote-tracking branch contains;
-- commits on a detached HEAD that no branch, tag or remote holds;
-- stashes.
+## What it finds
 
-Each piece gets a verdict by how long it has gone untouched:
-
-| Verdict | Meaning |
+| | |
 | --- | --- |
-| Забыто | untouched for over 30 days |
-| Заброшено | untouched for over 3 days (a stash: over 1 day) |
-| В работе | fresh work, or a repository with no remote at all |
-| Чисто | everything is on the server |
+| **Uncommitted files** | in any worktree, dated by the newest change |
+| **Unpushed commits** | on local branches, against every remote, not just the upstream |
+| **Orphaned commits** | on a detached HEAD that no branch, tag or remote holds |
+| **Stashes** | pinned by hash, so stashing again does not shuffle them |
+| **Unmerged branches** | pushed, but never made it into the default branch; squash merges count as merged |
+| **Leftovers** | merged branches and the agent worktrees still holding them |
 
-A branch whose upstream was deleted on the server is most likely merged: a squash merge leaves exactly that, and git cannot tell it apart from lost work. It stays "В работе" for two weeks, then turns "Заброшено" as leftover to clean up, and never "Забыто". A repository is as bad as its worst piece of work.
+Work that exists only on this machine gets a verdict by age: **В работе** for the first three days, **Заброшено** after that (a stash after one day), **Забыто** after a month. A pushed branch that never got merged ages slower: two weeks in progress, abandoned after that, forgotten after two months. Leftovers lose nothing, so they are only ever clutter. A repository is as bad as its worst piece, and its row says how much is lying around: «сейчас на main · 21 ветка, 13 не влиты · 4 ворктри».
 
-## Using it
+## A Source Control panel for every repository
 
-Pick the folder that holds your repositories. git-sight remembers it and scans every repository inside, skipping hidden folders, `Library` and `node_modules`. After that it follows the repositories as they change: an FSEvents stream watches their folders and worktrees, and an edit, commit or stash shows up within a second, without rescanning everything. A full rescan still runs when you come back to the app and every five minutes while it is open.
+- **Live.** An FSEvents watcher rereads only the repository that changed. Edits, commits and stashes show up within a second, and repositories touched in the last 15 minutes rise to the top under «Сейчас».
+- **The graph.** All branches, remote branches, tags and agent worktrees, drawn the way VS Code draws it. Commits the server lacks sit on an orange band. Scroll and it keeps reading history.
+- **Files and diffs.** Click a commit and its files open under it. Click a file and its diff opens below the graph.
+- **A task for your agent.** For anything found, one button copies a self-contained request: what was found, where, what to do. It always ends with "do not delete anything without asking me".
+- **Readable.** ⌘+ and ⌘− scale all text, the graph included.
 
-The window has three columns: repositories, the findings of the selected repository, and the detail of one finding. Repositories changed in the last 15 minutes sit at the top under "Сейчас" with what just happened, so you can watch several agents work at once. The rest are grouped by verdict, and any group folds. Every repository also has "Все ветки": the graph of all its branches, remote branches, tags and agent worktrees, with the commits the server does not have marked. A repository with nothing to fix opens straight on it. A branch shows its whole history, drawn like the graph in VS Code's Source Control with branch and tag labels. The commits the server does not have sit on an orange band above the ones it does. Click a commit and its files open right under it. Uncommitted work and stashes show their files.
+## Read-only, and it means it
 
-For work that was left behind, "Скопировать задачу для агента" puts a self-contained request on the clipboard: what was found, where, and what to do about it. Hover over the button to read it first. It always ends by telling the agent not to delete anything without asking you. Fresh work gets no such button, since someone is still on it.
+Every git call runs with `--no-optional-locks`, hooks pointed at `/dev/null`, fsmonitor and signature checks off, and `GIT_*` variables stripped from the environment. Filter drivers from a repository's own config are switched off; diffs go through plumbing with `--no-ext-diff --no-textconv`, so the index is never rewritten. Squash merges are found by comparing files, not by test-merging, which would write objects. A repository's config cannot make git-sight run a program. Integration tests plant hooks, fsmonitor daemons, signing programs, filters and diff drivers, and check that none of them fire and the index stays as it was.
 
-The interface is in Russian for now.
+## Build
 
-## Read-only by design
-
-Every git call runs with `--no-optional-locks`, hooks pointed at `/dev/null`, fsmonitor off, and `GIT_*` variables removed from the environment, so reading a repository does not take its locks or run its hooks. An integration test plants an fsmonitor hook and checks that a scan never fires it.
-
-## Build and run
-
-Requires macOS 14 or later and a Swift toolchain. Command Line Tools are enough.
+macOS 14 or later. Command Line Tools are enough.
 
 ```sh
 sh Scripts/package_app.sh
 open Artifacts/GitSight.app
 ```
 
-`swift run GitSight` also works, but a bare executable often opens its window behind the terminal.
-
-## Development
-
-Run the integration tests:
+## Develop
 
 ```sh
-swift run GitSightTests
+swift run GitSightTests                 # integration tests against real git repositories
+python3 Scripts/make_demo_workspace.py  # a folder of made-up repositories, one per verdict
+sh Scripts/render_window.sh window.png .build/DemoWorkspace search-api unmerged 1360 860 light
 ```
 
-`swift test` needs Xcode, so the tests are a plain executable.
+`swift test` needs Xcode, so the tests are a plain executable. Every test lands red first, then green with the mutants it killed named in the commit. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-To look at the window without pointing it at real work, build a folder of made-up repositories that covers every verdict and render the window to a PNG:
-
-```sh
-python3 Scripts/make_demo_workspace.py
-sh Scripts/render_window.sh window.png .build/DemoWorkspace billing-service branch 1360 860 light
-```
-
-The sidebar and toolbar are drawn with live glass, which an offscreen capture cannot see, so they come out blank in the PNG.
-
-Read [CONTRIBUTING.md](CONTRIBUTING.md) for the test-first workflow, mutation checks and review policy.
+The interface is in Russian.
 
 ## License
 
