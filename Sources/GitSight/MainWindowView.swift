@@ -367,6 +367,8 @@ enum SidebarGrid {
     /// The leading column: a repository's dot, a group's chevron.
     static let marker: CGFloat = 10
     static let gap: CGFloat = 8
+    /// How far a repository's findings sit in from its name, one level of nesting as in Mail.
+    static let nesting: CGFloat = 16
 }
 
 /// A group of repositories that folds on click. It sits on the same columns as the rows below it.
@@ -411,13 +413,13 @@ private struct SidebarHeader: View {
 
 // MARK: - Findings of one repository
 
-/// A finding under its repository's row: the icon sits in the repository name's column.
+/// A finding under its repository's row, one level in from the repository's name.
 private struct FindingRow: View {
     let finding: Finding
 
     var body: some View {
         HStack(spacing: SidebarGrid.gap) {
-            Color.clear.frame(width: SidebarGrid.marker, height: 1)
+            Color.clear.frame(width: SidebarGrid.marker + SidebarGrid.nesting, height: 1)
             HStack(spacing: 6) {
                 Image(systemName: finding.systemImage)
                     .selectableTint(finding.severity.tint)
