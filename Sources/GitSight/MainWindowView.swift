@@ -258,6 +258,7 @@ private struct RepositoryRow: View {
             }
         }
         .padding(.vertical, 2)
+        .padding(.leading, SidebarGrid.step)
         .tag(WorkspaceModel.graphID(of: repository))
         .help(RepositoryText.path(repository.path))
         .contextMenu { RepositoryActions(repository: repository) }
@@ -362,13 +363,13 @@ extension View {
     }
 }
 
-/// The columns every sidebar row shares, headers included, so nothing drifts between them.
+/// The columns every sidebar row shares. Each level of nesting moves in by one step, and a row's
+/// marker (a group's chevron, a repository's dot, a finding's icon) sits in the text column of the level above,
+/// as in Mail: group title at 18, repository name at 36, finding at 54.
 enum SidebarGrid {
-    /// The leading column: a repository's dot, a group's chevron.
-    static let marker: CGFloat = 10
-    static let gap: CGFloat = 8
-    /// How far a repository's findings sit in from its name, one level of nesting as in Mail.
-    static let nesting: CGFloat = 16
+    static let marker: CGFloat = 14
+    static let gap: CGFloat = 4
+    static let step: CGFloat = marker + gap
 }
 
 /// A group of repositories that folds on click. It sits on the same columns as the rows below it.
@@ -413,24 +414,22 @@ private struct SidebarHeader: View {
 
 // MARK: - Findings of one repository
 
-/// A finding under its repository's row, one level in from the repository's name.
+/// A finding under its repository's row, one level further in.
 private struct FindingRow: View {
     let finding: Finding
 
     var body: some View {
         HStack(spacing: SidebarGrid.gap) {
-            Color.clear.frame(width: SidebarGrid.marker + SidebarGrid.nesting, height: 1)
-            HStack(spacing: 6) {
-                Image(systemName: finding.systemImage)
-                    .selectableTint(finding.severity.tint)
-                    .frame(width: 18)
-                    .accessibilityHidden(true)
-                // The name alone repeats: a worktree on main and the branch main are both "main".
-                // What kind of work it is follows the name.
-                (Text(finding.title) + Text("  \(finding.detail)").foregroundStyle(.secondary))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-            }
+            Image(systemName: finding.systemImage)
+                .imageScale(.small)
+                .selectableTint(finding.severity.tint)
+                .frame(width: SidebarGrid.marker)
+                .accessibilityHidden(true)
+            // The name alone repeats: a worktree on main and the branch main are both "main".
+            // What kind of work it is follows the name.
+            (Text(finding.title) + Text("  \(finding.detail)").foregroundStyle(.secondary))
+                .lineLimit(1)
+                .truncationMode(.tail)
             Spacer(minLength: 4)
             Text(RepositoryText.age(finding.date, short: true))
                 .textRole(.secondary)
@@ -438,6 +437,7 @@ private struct FindingRow: View {
                 .monospacedDigit()
                 .selectableTint(finding.severity.tint)
         }
+        .padding(.leading, SidebarGrid.step * 2)
         .help([finding.title, finding.detail, finding.note].compactMap { $0 }.joined(separator: "\n"))
     }
 }

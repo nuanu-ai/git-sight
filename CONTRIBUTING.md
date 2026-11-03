@@ -41,7 +41,7 @@ Routine copy edits, formatting, mechanical renames, and small isolated fixes wit
 
 Every rule here comes from a mistake that already shipped once.
 
-- **One grid per list.** Headers and rows in a list share their columns: a fixed-width leading column for the dot, icon or chevron, then the text, then numbers on the right. The widths live in one place (`SidebarGrid` for the sidebar) and every row type uses them. Do not use a list's section headers for anything that must line up with the rows: SwiftUI insets them differently.
+- **One grid per list.** Headers and rows in a list share their columns: a fixed-width leading column for the dot, icon or chevron, then the text, then numbers on the right. The widths live in one place (`SidebarGrid` for the sidebar) and every row type uses them. Nesting moves in by one whole step per level, and a row's marker sits in the text column of the level above, so every level is shifted by the same amount. Do not use a list's section headers for anything that must line up with the rows: SwiftUI insets them differently.
 - **No backgrounds that fight the selection.** A tint or band inside a list has to match the system selection's insets exactly, or it goes.
 - **Numbers line up on the right.** Use monospaced digits and a shared trailing edge, so ages and counts read as a column.
 - **Nothing moves under the pointer.** A control keeps its size when its state changes. Confirmation swaps an icon; it does not change the label.
