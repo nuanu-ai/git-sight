@@ -9,7 +9,8 @@ enum RepositoryScoringIntegrationTests {
         try expectEqual(Severity(of: .uncommitted, lastChanged: daysAgo(4), now: now), .warning, "uncommitted work left for four days is abandoned")
         try expectEqual(Severity(of: .stash, lastChanged: daysAgo(2), now: now), .warning, "a stash is abandoned after a day")
         try expectEqual(Severity(of: .commits(upstreamGone: false), lastChanged: daysAgo(40), now: now), .critical, "unpushed commits left for over a month are forgotten")
-        try expectEqual(Severity(of: .commits(upstreamGone: true), lastChanged: daysAgo(10), now: now), .attention, "a branch deleted on the server ten days ago is still a notice")
+        try expectEqual(Severity(of: .commits(upstreamGone: true), lastChanged: daysAgo(13), now: now), .attention, "a branch deleted on the server is a notice for two weeks")
+        try expectEqual(Severity(of: .commits(upstreamGone: true), lastChanged: daysAgo(15), now: now), .warning, "after two weeks a deleted branch is leftover")
         try expectEqual(Severity(of: .commits(upstreamGone: true), lastChanged: daysAgo(40), now: now), .warning, "a deleted branch left for over two weeks is no longer in progress, but never forgotten work")
     }
 

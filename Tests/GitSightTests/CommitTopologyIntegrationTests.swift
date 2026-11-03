@@ -309,6 +309,8 @@ enum CommitTopologyIntegrationTests {
         try runGit(in: repositoryURL, ["stash", "push", "--include-untracked", "-m", "parked"])
         // A branch named like a remote's branch is still a local branch.
         try runGit(in: repositoryURL, ["branch", "origin/look-alike", "main"])
+        // git separates decorations with ", ", and a branch name may hold a comma.
+        try runGit(in: repositoryURL, ["branch", "fix,typo", "main"])
 
         let history = try RepositoryInspector().history(in: repositoryURL, revisions: ["--all"])
         try expectEqual(Set(history.first { $0.subject == "Feature" }?.refs ?? []), [CommitRef(kind: .branch, name: "feature", isHead: true)], "the checked-out branch is marked as HEAD")
@@ -317,6 +319,7 @@ enum CommitTopologyIntegrationTests {
             [
                 CommitRef(kind: .branch, name: "main"),
                 CommitRef(kind: .branch, name: "origin/look-alike"),
+                CommitRef(kind: .branch, name: "fix,typo"),
                 CommitRef(kind: .remoteBranch, name: "origin/main"),
                 CommitRef(kind: .tag, name: "v1.0")
             ],
@@ -384,5 +387,14 @@ enum CommitTopologyIntegrationTests {
         try runGit(in: localURL, ["init", "-b", "main"])
         try runGit(in: localURL, ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-m", "Only here"])
         try expectEqual(try RepositoryInspector().repositoryHistory(in: localURL).filter(\.isUnpushed), [], "without a remote nothing is marked, since nothing could be pushed")
+
+        // An orphan branch with no commits yet leaves HEAD pointing nowhere.
+        try runGit(in: localURL, ["checkout", "--orphan", "pages"])
+        try expectEqual(try RepositoryInspector().repositoryHistory(in: localURL).map(\.subject), ["Only here"], "an unborn HEAD does not hide the other branches")
+
+        // A worktree folder deleted by hand leaves git a stale entry; the findings skip it, so the graph does too.
+        try FileManager.default.removeItem(at: worktreeURL)
+        let pruned = try RepositoryInspector().repositoryHistory(in: repositoryURL)
+        try expectEqual(pruned.flatMap(\.refs).filter { $0.kind == .worktree }, [], "a deleted worktree gets no label")
     }
 }
