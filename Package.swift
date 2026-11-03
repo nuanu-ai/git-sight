@@ -7,11 +7,17 @@ let package = Package(
     platforms: [
         .macOS(.v14)
     ],
+    dependencies: [
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.6.0")
+    ],
     targets: [
         .target(name: "GitSightCore"),
         .executableTarget(
             name: "GitSight",
-            dependencies: ["GitSightCore"]
+            dependencies: [
+                "GitSightCore",
+                .product(name: "Sparkle", package: "Sparkle")
+            ]
         ),
         .executableTarget(
             name: "GitSightTests",

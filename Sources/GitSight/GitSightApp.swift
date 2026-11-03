@@ -5,6 +5,7 @@ import SwiftUI
 @MainActor
 struct GitSightApp: App {
     private let model = WorkspaceModel()
+    private let updater = AppUpdater()
 
     var body: some Scene {
         Window("git-sight", id: "main") {
@@ -16,6 +17,10 @@ struct GitSightApp: App {
         }
         .defaultSize(width: 1360, height: 860)
         .commands {
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates…", action: updater.checkForUpdates)
+                    .disabled(!updater.canCheckForUpdates)
+            }
             CommandGroup(after: .newItem) {
                 Button("Выбрать папку…", action: model.chooseRoot)
                     .keyboardShortcut("o")
