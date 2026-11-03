@@ -523,7 +523,7 @@ private struct GraphPane: View {
     @ViewBuilder
     private var graph: some View {
         VStack(spacing: 0) {
-            GraphLegend()
+            GraphLegend(scope: model.scope, showAllBranches: model.showAllBranches)
             Divider()
             if let error = model.historyError {
                 ContentUnavailableView("Couldn't read the history", systemImage: "exclamationmark.triangle", description: Text(error))
@@ -583,6 +583,12 @@ private struct GraphPane: View {
             commits.first { $0.refs.contains { $0.kind == .branch && $0.name == name } }?.fullHash
         }
         guard let tip else { return rows }
+        if model.scope != nil {
+            // The base's commits aren't in a single line's history, so the read said which ones are the branch's own.
+            rows.formUnion(model.scopeOwnCommits.map { .commit($0) })
+            if !rows.contains(where: \.isCommit) { rows.insert(.commit(tip)) }
+            return rows
+        }
         // What the base already has, on the server if it is there, so the base's own unpushed commits still count.
         let baseRefs = commits.filter { commit in
             commit.refs.contains { $0.kind == .remoteBranch && $0.name.hasSuffix("/\(repository.base)") }
@@ -739,25 +745,52 @@ private struct FactButton: View {
     }
 }
 
-/// What the marks in the graph mean, over it. The title goes first when the pane narrows, then the marks wrap.
+/// What the marks in the graph mean, over it. When the pane narrows the marks wrap, and "All branches" goes first;
+/// a single branch's title stays, since it says why the graph shows less.
 private struct GraphLegend: View {
+    let scope: HistoryScope?
+    let showAllBranches: () -> Void
+
     var body: some View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 12) {
-                Text("All branches")
-                    .fontWeight(.semibold)
-                    .foregroundStyle(.primary)
+                title
                 Spacer(minLength: 8)
                 marks
                     .fixedSize()
             }
-            marks
-                .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 6) {
+                if scope != nil { title }
+                marks
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .textRole(.label)
         .foregroundStyle(.secondary)
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
+    }
+
+    @ViewBuilder
+    private var title: some View {
+        if let scope {
+            HStack(spacing: 12) {
+                Text("History of \(scope.title)")
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help("This is older than the newest commits of all branches, so the graph shows its history alone.")
+                Button("All branches", action: showAllBranches)
+                    .buttonStyle(.link)
+                    .foregroundStyle(.tint)
+                    .fixedSize()
+            }
+        } else {
+            Text("All branches")
+                .fontWeight(.semibold)
+                .foregroundStyle(.primary)
+        }
     }
 
     private var marks: some View {

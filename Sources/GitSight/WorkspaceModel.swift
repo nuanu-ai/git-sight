@@ -20,8 +20,6 @@ final class WorkspaceModel {
     private static let refreshInterval: TimeInterval = 60
     /// A window left open rescans this often, for new repositories and work that aged into a new verdict.
     private static let periodicScanInterval: Duration = .seconds(5 * 60)
-    /// How far back a jump to a piece reads history looking for its row.
-    private static let historyCeiling = 3000
 
     private(set) var rootURL: URL?
     private(set) var repositories: [RepositorySnapshot] = []
@@ -48,8 +46,17 @@ final class WorkspaceModel {
     /// The worktree or branch selected in the repository's list.
     private(set) var selectedPlaceID: String?
 
-    /// Every branch of the selected repository, newest first; nil while it loads.
+    /// Every branch of the selected repository, newest first, or the scope's history; nil while it loads.
     private(set) var history: [CommitSnapshot]?
+    /// Set when the selected row is older than the newest commits of all branches: the graph then
+    /// follows that one line of history, so the row is in it however far back it is.
+    private(set) var scope: HistoryScope?
+    /// Commits on the scope's line that the base branch doesn't have, the selected branch's own work.
+    private(set) var scopeOwnCommits: Set<String> = []
+    /// The line of history that holds the selection, checked against each read of all branches.
+    private var selectedLine: HistoryScope?
+    /// The selection's row, scrolled to again when the graph switches lines: the old graph may have used up `focusRow`.
+    private var selectedRow: GraphRowID?
     private(set) var historyError: String?
     /// How many commits the history reads; grows as the user scrolls to its end.
     private var historyLimit = RepositoryInspector.historyPage
@@ -217,11 +224,20 @@ final class WorkspaceModel {
             return
         }
         guard changed?.contains(path) ?? true else { return }
-        if selectedPlace == nil { selectedPlaceID = Self.defaultPlace(in: repository)?.id }
+        if let place = selectedPlace {
+            // A detached HEAD moves on and a stash goes; the line follows them.
+            selectedLine = line(of: place, row: selectedRow)
+        } else {
+            selectedPlaceID = Self.defaultPlace(in: repository)?.id
+            // The graph followed the place that is gone.
+            selectedLine = nil
+            selectedRow = nil
+        }
+        let line = targetLine
         // Edits alone leave the graph as it was; rereading it on every save would keep it loading
         // while an agent works. New commits, branches or stashes change what it shows.
-        if previous.map({ Self.graphChanged(from: $0, to: repository) }) ?? true {
-            loadHistory(refreshing: true)
+        if line != scope || previous.map({ Self.graphChanged(from: $0, to: repository) }) ?? true {
+            loadHistory(line: line, limit: line == scope ? historyLimit : RepositoryInspector.historyPage)
         }
         switch openRow {
         case .stash(let hash) where !repository.stashes.contains(where: { $0.hash == hash }):
@@ -299,8 +315,7 @@ final class WorkspaceModel {
             UserDefaults.standard.set(repository.path.path, forKey: Self.openRepositoryKey)
             selectedPath = repository.path
             clearGraph()
-            historyLimit = RepositoryInspector.historyPage
-            loadHistory()
+            loadHistory(line: nil, limit: RepositoryInspector.historyPage)
         }
         let now = Date()
         if let column {
@@ -340,7 +355,44 @@ final class WorkspaceModel {
         focusRow = row
         // A branch's tip is known once the history holding it has loaded.
         pendingTip = row == nil ? place.id : nil
-        loadMoreUntilFocusShows()
+        selectedLine = line(of: place, row: row)
+        selectedRow = row
+        if selectedLine == scope, scope != nil { return }
+        if scope != nil {
+            // Off the line the graph follows: all branches first, narrowed again if they lack this selection too.
+            loadHistory(line: nil, limit: RepositoryInspector.historyPage)
+        } else if let history, let line = selectedLine, !line.isShown(in: history) {
+            loadHistory(line: line, limit: RepositoryInspector.historyPage)
+        }
+    }
+
+    /// Shows all branches again after the graph narrowed to one line of history.
+    func showAllBranches() {
+        guard scope != nil else { return }
+        selectedLine = nil
+        focusRow = nil
+        pendingTip = nil
+        loadHistory(line: nil, limit: RepositoryInspector.historyPage)
+    }
+
+    /// The line of history that holds a selection: a stash row's base, else the place's branch, detached HEAD or stash base.
+    /// A branch is named, not hashed, so the line follows new commits on it.
+    private func line(of place: WorkPlace, row: GraphRowID?) -> HistoryScope? {
+        let revision: String?
+        if case .stash(let hash) = row, let base = selectedRepository?.stashes.first(where: { $0.hash == hash })?.base {
+            revision = base
+        } else if place.branch != nil, let name = place.branchName {
+            revision = "refs/heads/\(name)"
+        } else {
+            revision = place.worktree?.head ?? place.pieces.compactMap(\.stash?.base).first
+        }
+        return revision.map { HistoryScope(revision: $0, title: place.branchName ?? place.worktree?.path.lastPathComponent ?? "this stash") }
+    }
+
+    /// The line a reread follows: the narrowed one while the selection is still on it, else all branches,
+    /// which narrow again by themselves when they lack the selection.
+    private var targetLine: HistoryScope? {
+        selectedLine == scope ? scope : nil
     }
 
     /// The row a piece of work lives on.
@@ -362,6 +414,8 @@ final class WorkspaceModel {
            let commit = history?.first(where: { $0.refs.contains { $0.kind == .branch && $0.name == name } }) {
             return .commit(commit.fullHash)
         }
+        // A live branch's tip is waited for, not swapped for an older stash base on it.
+        guard place.branch == nil else { return nil }
         return place.pieces.compactMap(\.stash?.base).first.map { .commit($0) }
     }
 
@@ -390,50 +444,91 @@ final class WorkspaceModel {
         isLoadingMore = false
         focusRow = nil
         pendingTip = nil
+        scope = nil
+        selectedLine = nil
+        selectedRow = nil
+        scopeOwnCommits = []
         closeRow()
         closeDiff()
     }
 
     // MARK: Loading
 
-    /// A refresh keeps the graph on screen until the new one arrives.
-    private func loadHistory(refreshing: Bool = false) {
+    /// Reads all branches, or one line of history. The graph on screen stays until the read is in, then switches whole.
+    private func loadHistory(line: HistoryScope?, limit: Int) {
         historyTask?.cancel()
         historyError = nil
         guard let path = selectedPath else { return }
-        let limit = historyLimit
-        let worker = Task.detached(priority: .userInitiated) {
-            try RepositoryInspector().repositoryHistory(in: path, limit: limit)
+        let base = selectedRepository.map { repository in
+            // On the server if it is there, as the graph's highlight takes it; the base's own line keeps its unpushed commits.
+            ["--not", "--remotes=*/\(repository.base)"]
+                + (repository.branches.contains { $0.name == repository.base } && line?.revision != "refs/heads/\(repository.base)"
+                    ? ["refs/heads/\(repository.base)"] : [])
+        } ?? []
+        let worker = Task.detached(priority: .userInitiated) { () throws -> ([CommitSnapshot], Set<String>) in
+            let inspector = RepositoryInspector()
+            guard let line else { return (try inspector.repositoryHistory(in: path, limit: limit), []) }
+            let own = try inspector.history(in: path, revisions: [line.revision] + base, limit: limit)
+            return (try inspector.history(of: [line.revision], in: path, limit: limit), Set(own.filter { !$0.isBoundary }.map(\.fullHash)))
         }
         historyTask = Task { [weak self] in
             let result = await withTaskCancellationHandler { await worker.result } onCancel: { worker.cancel() }
             guard let self, !Task.isCancelled, self.selectedPath == path else { return }
             self.isLoadingMore = false
             switch result {
-            case .success(let commits):
+            case .success(let (commits, own)):
+                // The selection moved off this line while it was read.
+                if let line, line != self.selectedLine {
+                    self.loadHistory(line: nil, limit: RepositoryInspector.historyPage)
+                    return
+                }
+                // All branches don't reach the selection: read its own line instead.
+                if line == nil, let wanted = self.selectedLine, !wanted.isShown(in: commits) {
+                    self.loadHistory(line: wanted, limit: RepositoryInspector.historyPage)
+                    return
+                }
+                let switched = self.scope != line
+                self.scope = line
                 self.history = commits
+                self.historyLimit = limit
+                self.scopeOwnCommits = own
+                if switched, let row = self.selectedRow { self.focusRow = row }
                 if let id = self.pendingTip, id == self.selectedPlaceID, let place = self.selectedPlace,
                    let row = self.tipRow(of: place) {
                     self.pendingTip = nil
                     self.focusRow = row
                 }
-                if case .commit(let hash) = self.openRow {
-                    if !commits.contains(where: { $0.fullHash == hash }) {
-                        // A row jumped to further back than this read stays open while the next read looks for it.
-                        if self.openRow != self.focusRow || !self.canReadFurther {
-                            self.closeRow()
-                            self.closeDiff()
-                        }
-                    } else if self.rowFiles == nil {
+                if let row = self.openRow, let anchor = self.anchor(of: row) {
+                    if !commits.contains(where: { $0.fullHash == anchor }) {
+                        // Not drawn, so not open: its files would also reach the agent task unseen.
+                        self.closeRow()
+                        self.closeDiff()
+                    } else if row.isCommit, self.rowFiles == nil {
                         // A commit's files wait for the history that describes the commit.
                         self.loadRowFiles()
                     }
                 }
-                self.loadMoreUntilFocusShows()
             case .failure(let error):
                 if error is CancellationError { return }
+                if line != nil {
+                    // The branch is gone since; all branches are still there to show, without the row.
+                    self.selectedLine = nil
+                    self.focusRow = nil
+                    self.pendingTip = nil
+                    self.loadHistory(line: nil, limit: RepositoryInspector.historyPage)
+                    return
+                }
                 self.historyError = error.localizedDescription
             }
+        }
+    }
+
+    /// The commit a graph row is drawn on.
+    private func anchor(of row: GraphRowID) -> String? {
+        switch row {
+        case .commit(let hash): hash
+        case .uncommitted(let worktree): selectedRepository?.worktrees.first { $0.path == worktree }?.head
+        case .stash(let hash): selectedRepository?.stashes.first { $0.hash == hash }?.base
         }
     }
 
@@ -445,37 +540,10 @@ final class WorkspaceModel {
 
     /// Reads the next page of history, if the last read stopped at its limit.
     func loadMoreHistory() {
-        guard !isLoadingMore, canReadFurther else { return }
+        // Not while the graph is about to switch lines.
+        guard !isLoadingMore, canReadFurther, targetLine == scope else { return }
         isLoadingMore = true
-        historyLimit += RepositoryInspector.historyPage
-        loadHistory(refreshing: true)
-    }
-
-    /// A jump to an old stash or branch reads back to the ceiling at once until its row is in the graph,
-    /// and gives up on it when even that does not reach it.
-    private func loadMoreUntilFocusShows() {
-        guard let history, !isLoadingMore else { return }
-        let missing: Bool
-        if let focus = focusRow {
-            let anchor: String?
-            switch focus {
-            case .commit(let hash): anchor = hash
-            case .uncommitted(let worktree): anchor = selectedRepository?.worktrees.first { $0.path == worktree }?.head
-            case .stash(let hash): anchor = selectedRepository?.stashes.first { $0.hash == hash }?.base
-            }
-            missing = anchor.map { anchor in !history.contains { $0.fullHash == anchor } } ?? false
-        } else {
-            missing = pendingTip != nil && pendingTip == selectedPlaceID
-        }
-        guard missing else { return }
-        guard canReadFurther, historyLimit < Self.historyCeiling else {
-            focusRow = nil
-            pendingTip = nil
-            return
-        }
-        isLoadingMore = true
-        historyLimit = Self.historyCeiling
-        loadHistory(refreshing: true)
+        loadHistory(line: scope, limit: historyLimit + RepositoryInspector.historyPage)
     }
 
     private func loadRowFiles(refreshing: Bool = false) {
@@ -597,4 +665,23 @@ extension GraphRowID {
 extension RepositorySnapshot {
     /// Stashes are shared by all worktrees; a bare repository can only list them from one.
     var stashDirectory: URL { worktrees.first?.path ?? path }
+}
+
+/// One line of history the graph follows instead of all branches.
+struct HistoryScope: Equatable {
+    /// What git log reads: a branch ref or a commit.
+    let revision: String
+    /// The branch or worktree it belongs to, for the graph's title.
+    let title: String
+}
+
+extension HistoryScope {
+    /// Whether `commits` hold this line's tip.
+    func isShown(in commits: [CommitSnapshot]) -> Bool {
+        if revision.hasPrefix("refs/heads/") {
+            let name = revision.dropFirst("refs/heads/".count)
+            return commits.contains { $0.refs.contains { $0.kind == .branch && $0.name == name } }
+        }
+        return commits.contains { $0.fullHash == revision }
+    }
 }
