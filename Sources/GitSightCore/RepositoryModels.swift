@@ -106,6 +106,9 @@ public struct CommitSnapshot: Equatable {
     public let parents: [String]
     public let refs: [String]
     public let lane: Int
+    /// The lane each parent's line runs down, in `parents` order. A lane stays held
+    /// for its parent until the parent's row, so a line drawn down it crosses no other commit.
+    public let parentLanes: [Int]
     /// The commit is outside the requested range and only marks where it starts, e.g. the fork point.
     public let isBoundary: Bool
 
@@ -118,6 +121,7 @@ public struct CommitSnapshot: Equatable {
         parents: [String],
         refs: [String],
         lane: Int,
+        parentLanes: [Int] = [],
         isBoundary: Bool = false
     ) {
         self.fullHash = fullHash
@@ -128,6 +132,7 @@ public struct CommitSnapshot: Equatable {
         self.parents = parents
         self.refs = refs
         self.lane = lane
+        self.parentLanes = parentLanes
         self.isBoundary = isBoundary
     }
 }

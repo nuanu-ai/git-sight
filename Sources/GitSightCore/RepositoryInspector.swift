@@ -307,7 +307,15 @@ public struct RepositoryInspector {
                 isBoundary: commit.isBoundary
             ))
         }
-        return laidOutCommits
+        let lanes = Dictionary(laidOutCommits.map { ($0.fullHash, $0.lane) }, uniquingKeysWith: { first, _ in first })
+        return laidOutCommits.map { commit in
+            CommitSnapshot(
+                fullHash: commit.fullHash, shortHash: commit.shortHash, subject: commit.subject, author: commit.author,
+                date: commit.date, parents: commit.parents, refs: commit.refs, lane: commit.lane,
+                parentLanes: commit.parents.enumerated().map { $0.offset == 0 ? commit.lane : lanes[$0.element] ?? commit.lane },
+                isBoundary: commit.isBoundary
+            )
+        }
     }
 
     private func webURL(from remote: String) -> URL? {

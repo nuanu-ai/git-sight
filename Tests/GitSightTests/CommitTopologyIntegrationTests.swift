@@ -178,4 +178,46 @@ enum CommitTopologyIntegrationTests {
         )
         try expectEqual(history.map(\.subject), ["Detached work", "Pushed"], "a file named HEAD in the worktree does not hide the history")
     }
+
+    static func testParentLinesCrossNoOtherCommit() throws {
+        let repositoryURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent(".build/GitSightTests/\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: repositoryURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: repositoryURL) }
+        try runGit(in: repositoryURL, ["init", "-b", "main"])
+        try runGit(in: repositoryURL, ["config", "user.name", "Test User"])
+        try runGit(in: repositoryURL, ["config", "user.email", "test@example.com"])
+        func commit(_ subject: String) throws {
+            try runGit(in: repositoryURL, ["commit", "--allow-empty", "-m", subject])
+        }
+
+        // The everyday shape: main is merged into a feature, then the feature into main.
+        try commit("c0")
+        try commit("c1")
+        try runGit(in: repositoryURL, ["branch", "feature"])
+        try commit("c2")
+        try runGit(in: repositoryURL, ["checkout", "feature"])
+        try commit("c4")
+        try runGit(in: repositoryURL, ["merge", "--no-ff", "main", "-m", "c5"])
+        try runGit(in: repositoryURL, ["checkout", "main"])
+        try commit("c3")
+        try runGit(in: repositoryURL, ["merge", "--no-ff", "feature", "-m", "c6"])
+
+        let history = try RepositoryInspector().history(in: repositoryURL, revisions: ["refs/heads/main"])
+        let rows = Dictionary(uniqueKeysWithValues: history.enumerated().map { ($0.element.fullHash, $0.offset) })
+        var crossings: [String] = []
+        for (row, commit) in history.enumerated() {
+            try expectEqual(commit.parentLanes.count, commit.parents.count, "\(commit.subject) has a lane for every parent")
+            for (parent, lane) in zip(commit.parents, commit.parentLanes) {
+                guard let parentRow = rows[parent] else { continue }
+                for between in history[(row + 1)..<parentRow] where between.lane == lane {
+                    crossings.append("\(commit.subject)→\(history[parentRow].subject) crosses \(between.subject)")
+                }
+            }
+        }
+        try expectEqual(crossings, [], "a line to a parent passes no other commit's dot")
+    }
 }
