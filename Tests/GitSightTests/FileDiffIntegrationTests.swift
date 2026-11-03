@@ -59,5 +59,10 @@ enum FileDiffIntegrationTests {
         try runGit(in: repositoryURL, ["commit", "-m", "Binary"])
         let binary = try inspector.history(of: ["HEAD"], in: repositoryURL)[0]
         try expectEqual(try inspector.diff(of: "blob.bin", in: binary, repositoryURL: repositoryURL).isBinary, true, "a binary file is reported as binary")
+
+        try (1...6000).map { "line \($0)" }.joined(separator: "\n").write(to: repositoryURL.appendingPathComponent("huge.txt"), atomically: true, encoding: .utf8)
+        let huge = try inspector.uncommittedDiff(of: CommitFileSnapshot(status: "?", path: "huge.txt"), in: repositoryURL)
+        try expectEqual(huge.lines.count, RepositoryInspector.diffLineLimit, "a huge diff is cut at the limit")
+        try expectEqual(huge.isTruncated, true, "a cut diff says so")
     }
 }

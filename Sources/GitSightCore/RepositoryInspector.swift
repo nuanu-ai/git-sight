@@ -54,19 +54,87 @@ public struct RepositoryInspector {
         ])
     }
 
-    /// How one file changed in a commit, against its first parent.
+    /// A diff longer than this is cut; nobody reads past it in a side pane.
+    public static let diffLineLimit = 5000
+    /// Diffs show the file as stored: no external diff tools or text converters from the repository's config.
+    private static let diffOptions = ["--no-color", "--no-ext-diff", "--no-textconv"]
+
+    /// How one file changed in a commit, against its first parent, as its file list counts it.
     public func diff(of path: String, in commit: CommitSnapshot, repositoryURL: URL) throws -> FileDiff {
-        FileDiff(lines: [])
+        try shownDiff(of: path, in: commit.fullHash, repositoryURL: repositoryURL)
     }
 
     /// How one uncommitted file differs from HEAD; an untracked file is all new.
     public func uncommittedDiff(of file: CommitFileSnapshot, in worktreeURL: URL) throws -> FileDiff {
-        FileDiff(lines: [])
+        // Before the first commit there is no HEAD to diff against, so every file is new.
+        let hasHead = try git.optionalOutput(in: worktreeURL, ["rev-parse", "--verify", "--quiet", "HEAD"]) != nil
+        guard file.status != "?", hasHead else {
+            let arguments = ["diff"] + Self.diffOptions + ["--no-index", "--", "/dev/null", file.path]
+            let result = try git.run(in: worktreeURL, arguments)
+            // --no-index exits with 1 when the files differ, which they always do here.
+            if result.status == 1 { return Self.fileDiff(String(decoding: result.standardOutput, as: UTF8.self)) }
+            return Self.fileDiff(try git.output(from: result, in: worktreeURL, arguments))
+        }
+        return Self.fileDiff(try git.output(in: worktreeURL, ["diff"] + Self.diffOptions + ["HEAD", "--", file.path]))
     }
 
     /// How one file in a stash differs from the commit it was stashed on.
+    /// Untracked files live in the stash's third parent, a commit of their own.
     public func stashDiff(of file: CommitFileSnapshot, stash: String, in repositoryURL: URL) throws -> FileDiff {
-        FileDiff(lines: [])
+        let untracked = try git.optionalOutput(in: repositoryURL, ["rev-parse", "--verify", "--quiet", "\(stash)^3:\(file.path)"]) != nil
+        return try shownDiff(of: file.path, in: untracked ? "\(stash)^3" : stash, repositoryURL: repositoryURL)
+    }
+
+    /// `git show` of one path: a root commit shows as all new, a merge against its first parent.
+    private func shownDiff(of path: String, in revision: String, repositoryURL: URL) throws -> FileDiff {
+        Self.fileDiff(try git.output(in: repositoryURL, [
+            "show", "--format=", "--diff-merges=first-parent", "--no-renames"
+        ] + Self.diffOptions + [revision, "--", path]))
+    }
+
+    /// Reads a unified diff of one file into numbered lines. Headers before the first hunk are skipped.
+    static func fileDiff(_ output: String) -> FileDiff {
+        var rawLines = output.split(separator: "\n", omittingEmptySubsequences: false)
+        if rawLines.last == "" { rawLines.removeLast() }
+        var lines: [DiffLine] = []
+        var isBinary = false
+        var inHunk = false
+        var old = 0
+        var new = 0
+        for raw in rawLines {
+            if lines.count >= diffLineLimit { return FileDiff(lines: lines, isTruncated: true) }
+            if raw.hasPrefix("@@ ") {
+                // "@@ -12,3 +12,4 @@ heading": where each side's run starts.
+                let ranges = raw.split(separator: " ")
+                old = ranges.count > 1 ? Int(ranges[1].dropFirst().prefix { $0 != "," }) ?? 0 : 0
+                new = ranges.count > 2 ? Int(ranges[2].dropFirst().prefix { $0 != "," }) ?? 0 : 0
+                inHunk = true
+                lines.append(DiffLine(kind: .hunk, oldLine: nil, newLine: nil, text: String(raw)))
+                continue
+            }
+            guard inHunk else {
+                if raw.hasPrefix("Binary files ") { isBinary = true }
+                continue
+            }
+            let text = String(raw.dropFirst())
+            switch raw.first {
+            case "+":
+                lines.append(DiffLine(kind: .added, oldLine: nil, newLine: new, text: text))
+                new += 1
+            case "-":
+                lines.append(DiffLine(kind: .removed, oldLine: old, newLine: nil, text: text))
+                old += 1
+            case "\\":
+                // "\ No newline at end of file"
+                continue
+            default:
+                // A context line; diff.suppressBlankEmpty writes an empty one without its leading space.
+                lines.append(DiffLine(kind: .context, oldLine: old, newLine: new, text: text))
+                old += 1
+                new += 1
+            }
+        }
+        return FileDiff(lines: lines, isBinary: isBinary)
     }
 
     /// Files a stash holds, including the untracked ones it saved.
