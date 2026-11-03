@@ -257,12 +257,12 @@ public struct RepositoryInspector {
 
     private func stashes(in repositoryURL: URL) throws -> [StashSnapshot] {
         let output = try git.output(in: repositoryURL, [
-            "stash", "list", "--pretty=format:%gd%x1F%gs%x1F%cI%x1E"
+            "stash", "list", "--pretty=format:%gd%x1F%H%x1F%gs%x1F%cI%x1E"
         ])
         return try Self.records(output).map { record in
             let fields = Self.fields(record)
-            guard fields.count >= 3, let date = Self.date(from: fields[2]) else { throw Self.parseError(record) }
-            return StashSnapshot(name: fields[0], hash: fields[0], message: fields[1], date: date)
+            guard fields.count >= 4, let date = Self.date(from: fields[3]) else { throw Self.parseError(record) }
+            return StashSnapshot(name: fields[0], hash: fields[1], message: fields[2], date: date)
         }
     }
 
