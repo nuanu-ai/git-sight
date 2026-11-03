@@ -7,14 +7,42 @@ struct RepositoryView: View {
     @Bindable var model: WorkspaceModel
     let repository: RepositorySnapshot
 
+    /// The list's width, kept across launches; HSplitView forgets where its divider was.
+    @AppStorage("placeListWidth") private var listWidth = 324.0
+
     var body: some View {
-        HSplitView {
+        HStack(spacing: 0) {
             PlaceList(model: model, repository: repository)
-                .frame(minWidth: 300, idealWidth: 380, maxWidth: 520)
+                .frame(width: listWidth)
+            ColumnDivider(width: $listWidth)
             GraphPane(model: model, repository: repository)
                 .frame(minWidth: 420, maxWidth: .infinity)
         }
+        .coordinateSpace(name: ColumnDivider.space)
     }
+}
+
+/// The line between the list and the graph; dragging it sets the list's width.
+private struct ColumnDivider: View {
+    @Binding var width: Double
+
+    var body: some View {
+        Divider()
+            .overlay {
+                // A wider grip than the line itself, as macOS split views have.
+                Color.clear
+                    .frame(width: 8)
+                    .contentShape(Rectangle())
+                    .onHover { inside in
+                        if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+                    }
+                    .gesture(DragGesture(coordinateSpace: .named(Self.space)).onChanged { value in
+                        width = min(520, max(260, value.location.x.rounded()))
+                    })
+            }
+    }
+
+    static let space = "repository"
 }
 
 // MARK: - The list of worktrees and branches
@@ -155,19 +183,15 @@ private struct PlaceList: View {
                     }
                 }
             }
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text(RepositoryText.path(repository.path))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .textSelection(.enabled)
-                    .layoutPriority(-1)
-                Text("· base branch \(repository.base)")
-                    .lineLimit(1)
-                if weight > 0 {
-                    Text("· weight \(RepositoryText.weight(weight))")
-                        .monospacedDigit()
-                        .lineLimit(1)
-                    WeightInfoButton(model: model)
+            // The path keeps its line to itself when the column is too narrow to share it.
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    path.fixedSize()
+                    facts(weight: weight, afterPath: true)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    path
+                    HStack(alignment: .firstTextBaseline, spacing: 4) { facts(weight: weight, afterPath: false) }
                 }
             }
             .textRole(.secondary)
@@ -177,6 +201,25 @@ private struct PlaceList: View {
         .padding(.horizontal, 16)
         .padding(.top, 12)
         .padding(.bottom, 8)
+    }
+
+    private var path: some View {
+        Text(RepositoryText.path(repository.path))
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .textSelection(.enabled)
+    }
+
+    @ViewBuilder
+    private func facts(weight: Double, afterPath: Bool) -> some View {
+        Text("\(afterPath ? "· " : "")base branch \(repository.base)")
+            .lineLimit(1)
+        if weight > 0 {
+            Text("· weight \(RepositoryText.weight(weight))")
+                .monospacedDigit()
+                .lineLimit(1)
+            WeightInfoButton(model: model)
+        }
     }
 
     private func section(_ title: String, systemImage: String, count: Int, @ViewBuilder rows: () -> some View) -> some View {

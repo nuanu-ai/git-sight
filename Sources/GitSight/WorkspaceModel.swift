@@ -14,6 +14,8 @@ enum GraphRowID: Hashable {
 @Observable
 final class WorkspaceModel {
     private static let rootKey = "rootPath"
+    /// The repository on screen when the app quit, opened again after the first scan.
+    private static let openRepositoryKey = "openRepositoryPath"
     /// Coming back to the app rescans only if the last result is older than this.
     private static let refreshInterval: TimeInterval = 60
     /// A window left open rescans this often, for new repositories and work that aged into a new verdict.
@@ -187,8 +189,13 @@ final class WorkspaceModel {
 
     private func apply(_ result: RepositoryScanResult) {
         scanFailures = result.failures
+        let firstScan = lastScanDate == nil
         lastScanDate = Date()
         show(result.repositories)
+        if firstScan, selectedPath == nil, let path = UserDefaults.standard.string(forKey: Self.openRepositoryKey),
+           let repository = repositories.first(where: { $0.path.path == path }) {
+            open(repository)
+        }
         watch()
         // Changes that came in while scanning may have landed after the scan read that repository.
         if !changedPaths.isEmpty { repositoriesChanged([]) }
@@ -280,6 +287,7 @@ final class WorkspaceModel {
     // MARK: Navigation
 
     func showOverview() {
+        UserDefaults.standard.removeObject(forKey: Self.openRepositoryKey)
         selectedPath = nil
         selectedPlaceID = nil
         clearGraph()
@@ -288,6 +296,7 @@ final class WorkspaceModel {
     /// Opens a repository on the place with the most at stake, or on the heaviest piece of one overview column.
     func open(_ repository: RepositorySnapshot, column: WorkColumn? = nil) {
         if selectedPath != repository.path {
+            UserDefaults.standard.set(repository.path.path, forKey: Self.openRepositoryKey)
             selectedPath = repository.path
             clearGraph()
             historyLimit = RepositoryInspector.historyPage
