@@ -506,15 +506,24 @@ private struct FindingHeader: View {
 
     private func actions(shortPrimary: Bool, iconsOnly: Bool) -> some View {
         HStack(spacing: 8) {
-            let copied = model.copiedFindingID == finding.id
-            Button {
-                model.copyAgentTask(for: finding)
-            } label: {
-                Label(copied ? "Скопировано" : (shortPrimary ? "Задача для агента" : "Скопировать задачу для агента"),
-                      systemImage: copied ? "checkmark" : "doc.on.clipboard")
+            // Fresh work is still being done, by you or an agent; a task for it would only get in the way.
+            if finding.severity >= .warning || finding.work == .commits(upstreamGone: true) {
+                let copied = model.copiedFindingID == finding.id
+                Button {
+                    model.copyAgentTask(for: finding)
+                } label: {
+                    // The label keeps its width when it confirms, so nothing moves under the pointer.
+                    HStack(spacing: 6) {
+                        Image(systemName: copied ? "checkmark" : "doc.on.clipboard")
+                            .frame(width: 18)
+                        Text(shortPrimary ? "Задача для агента" : "Скопировать задачу для агента")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                // Hovering shows exactly what goes on the clipboard.
+                .help(model.agentTask(for: finding) ?? "")
+                .accessibilityValue(copied ? "Скопировано" : "")
             }
-            .buttonStyle(.borderedProminent)
-            .help("Текст, который можно вставить агенту: что найдено, где и что с этим сделать")
             secondary("Показать в Finder", systemImage: "folder", iconOnly: iconsOnly) {
                 Workspace.reveal(finding.location)
             }

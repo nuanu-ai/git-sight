@@ -30,7 +30,7 @@ Pick the folder that holds your repositories. git-sight remembers it and scans e
 
 The window has three columns: repositories, the findings of the selected repository, and the detail of one finding. Repositories changed in the last 15 minutes sit at the top under "Сейчас" with what just happened, so you can watch several agents work at once. The rest are grouped by verdict. A branch shows the commits that are not on the server, down to the commit the server already has; click a commit to see its files. Uncommitted work and stashes show their files.
 
-"Скопировать задачу для агента" puts a self-contained request on the clipboard: what was found, where, and what to do about it. It always ends by telling the agent not to delete anything without asking you.
+For work that was left behind, "Скопировать задачу для агента" puts a self-contained request on the clipboard: what was found, where, and what to do about it. Hover over the button to read it first. It always ends by telling the agent not to delete anything without asking you. Fresh work gets no such button, since someone is still on it.
 
 The interface is in Russian for now.
 

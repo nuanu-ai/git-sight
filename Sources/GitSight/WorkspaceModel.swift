@@ -279,12 +279,18 @@ final class WorkspaceModel {
         }
     }
 
-    func copyAgentTask(for finding: Finding) {
-        guard let repository = selectedRepository else { return }
+    /// The request "Скопировать задачу для агента" puts on the clipboard, with the files on screen.
+    func agentTask(for finding: Finding) -> String? {
+        guard let repository = selectedRepository else { return nil }
         var files: [CommitFileSnapshot]?
         if case .files(let loaded) = findingContent { files = loaded }
+        return repository.agentTask(for: finding, files: files)
+    }
+
+    func copyAgentTask(for finding: Finding) {
+        guard let task = agentTask(for: finding) else { return }
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(repository.agentTask(for: finding, files: files), forType: .string)
+        NSPasteboard.general.setString(task, forType: .string)
         copiedFindingID = finding.id
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(2))
