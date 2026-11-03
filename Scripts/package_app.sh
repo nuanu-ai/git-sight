@@ -5,7 +5,7 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$ROOT"
 
 swift build -c release
-python Scripts/generate_icon.py
+python3 Scripts/generate_icon.py
 iconutil -c icns Artifacts/AppIcon.iconset -o Resources/AppIcon.icns
 
 APP=Artifacts/GitSight.app
