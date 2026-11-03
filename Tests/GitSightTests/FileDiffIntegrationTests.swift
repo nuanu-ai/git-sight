@@ -65,4 +65,68 @@ enum FileDiffIntegrationTests {
         try expectEqual(huge.lines.count, RepositoryInspector.diffLineLimit, "a huge diff is cut at the limit")
         try expectEqual(huge.isTruncated, true, "a cut diff says so")
     }
+
+    /// Files as they come: Windows line endings, no final newline, names that look like globs,
+    /// a root commit under log.showRoot=false, a nested repository nobody added.
+    static func testDiffsReadAnyFileAsGitStoresIt() throws {
+        let rootURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent(".build/GitSightTests/\(UUID().uuidString)", isDirectory: true)
+        let repositoryURL = rootURL.appendingPathComponent("repository")
+        try FileManager.default.createDirectory(at: repositoryURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        try runGit(in: repositoryURL, ["init", "-b", "main"])
+        try runGit(in: repositoryURL, ["config", "user.name", "Test User"])
+        try runGit(in: repositoryURL, ["config", "user.email", "test@example.com"])
+        try runGit(in: repositoryURL, ["config", "log.showRoot", "false"])
+        func write(_ text: String, _ name: String) throws {
+            try text.write(to: repositoryURL.appendingPathComponent(name), atomically: true, encoding: .utf8)
+        }
+        try write("one\r\ntwo\r\n", "windows.txt")
+        try write("x", "last.txt")
+        try write((1...20).map { "line \($0)" }.joined(separator: "\n") + "\n", "long.txt")
+        try write("star\n", "a*.txt")
+        try write("abc\n", "abc.txt")
+        try runGit(in: repositoryURL, ["add", "."])
+        try runGit(in: repositoryURL, ["commit", "-m", "Root"])
+        let inspector = RepositoryInspector()
+        let root = try inspector.history(of: ["HEAD"], in: repositoryURL)[0]
+        try expectEqual(try inspector.diff(of: "last.txt", in: root, repositoryURL: repositoryURL).lines.map(\.text), ["@@ -0,0 +1 @@", "x"], "a root commit shows its files as new, whatever log.showRoot says")
+
+        try write("star, edited\n", "a*.txt")
+        try write("abc, edited\n", "abc.txt")
+        try runGit(in: repositoryURL, ["commit", "-am", "Edit both"])
+        let edit = try inspector.history(of: ["HEAD"], in: repositoryURL)[0]
+        try expectEqual(try inspector.diff(of: "a*.txt", in: edit, repositoryURL: repositoryURL).lines.filter { $0.kind == .added }.map(\.text), ["star, edited"], "a file named like a glob shows only itself")
+
+        try write("one\r\n2\r\n", "windows.txt")
+        try expectEqual(try inspector.uncommittedDiff(of: CommitFileSnapshot(status: "M", path: "windows.txt"), in: repositoryURL).lines.map(\.text), ["@@ -1,2 +1,2 @@", "one", "two", "2"], "Windows line endings split into lines like any others")
+
+        try write("y", "last.txt")
+        try expectEqual(try inspector.uncommittedDiff(of: CommitFileSnapshot(status: "M", path: "last.txt"), in: repositoryURL).lines, [
+            DiffLine(kind: .hunk, oldLine: nil, newLine: nil, text: "@@ -1 +1 @@"),
+            DiffLine(kind: .removed, oldLine: 1, newLine: nil, text: "x"),
+            DiffLine(kind: .added, oldLine: nil, newLine: 1, text: "y")
+        ], "a file without a final newline: one-line ranges, and git's note about it left out")
+
+        try write((1...20).map { $0 == 2 ? "changed 2" : $0 == 19 ? "changed 19" : "line \($0)" }.joined(separator: "\n") + "\n", "long.txt")
+        let long = try inspector.uncommittedDiff(of: CommitFileSnapshot(status: "M", path: "long.txt"), in: repositoryURL).lines
+        try expectEqual(long.filter { $0.kind == .added }.map(\.newLine), [2, 19], "each run of changes is numbered from its own start")
+
+        try write("\u{301}accent\n", "abc.txt")
+        try expectEqual(try inspector.uncommittedDiff(of: CommitFileSnapshot(status: "M", path: "abc.txt"), in: repositoryURL).lines.filter { $0.kind == .added }.map(\.text), ["\u{301}accent"], "a line that starts with a combining mark is still an added line")
+
+        let nestedURL = repositoryURL.appendingPathComponent("nested")
+        try FileManager.default.createDirectory(at: nestedURL, withIntermediateDirectories: true)
+        try runGit(in: nestedURL, ["init", "-b", "main"])
+        var nestedFailed = false
+        do {
+            _ = try inspector.uncommittedDiff(of: CommitFileSnapshot(status: "?", path: "nested/"), in: repositoryURL)
+        } catch {
+            nestedFailed = true
+        }
+        try expectEqual(nestedFailed, true, "a nested repository has no diff, and the pane says it could not read one")
+    }
 }
