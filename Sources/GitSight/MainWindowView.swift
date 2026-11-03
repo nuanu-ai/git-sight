@@ -639,15 +639,18 @@ private struct FileList: View {
         if files.isEmpty {
             ContentUnavailableView("Файлов нет", systemImage: "doc")
         } else {
-            // Selecting a file opens its diff below; selecting it again closes it.
-            List(selection: Binding {
-                openFile?.path
-            } set: { path in
-                if let file = files.first(where: { $0.path == path }) ?? openFile { onOpenFile(file) }
-            }) {
-                ForEach(files, id: \.path) { file in
-                    FileRow(file: file)
-                }
+            // A click opens a file's diff below and the same click closes it. A List selection
+            // would not report a click on the row it has already selected.
+            List(files, id: \.path) { file in
+                FileRow(file: file)
+                    .contentShape(Rectangle())
+                    .onTapGesture { onOpenFile(file) }
+                    .listRowBackground(
+                        RoundedRectangle(cornerRadius: 5)
+                            .fill(file.path == openFile?.path ? Color.accentColor.opacity(0.22) : .clear)
+                            .padding(.horizontal, 8)
+                    )
+                    .listRowSeparator(.hidden)
             }
         }
     }

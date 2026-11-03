@@ -300,7 +300,13 @@ final class WorkspaceModel {
                 self.findingContent = content
                 // The open diff follows the file as it changes, and closes when the file is gone.
                 if let file = self.diffFile, case .files(let files) = content {
-                    if files.contains(where: { $0.path == file.path }) { self.loadDiff(refreshing: true) } else { self.closeDiff() }
+                    // Its status may have changed too, say from added to untracked, and that picks the diff's base.
+                    if let current = files.first(where: { $0.path == file.path }) {
+                        self.diffFile = current
+                        self.loadDiff(refreshing: true)
+                    } else {
+                        self.closeDiff()
+                    }
                 }
                 if case .history(let commits) = content, let hash = self.selectedCommitHash,
                    !commits.contains(where: { $0.fullHash == hash }) {
@@ -349,7 +355,7 @@ final class WorkspaceModel {
 
     /// Opens a file's diff, or closes it when that file's diff is already open.
     func toggleDiff(of file: CommitFileSnapshot) {
-        if diffFile == file {
+        if diffFile?.path == file.path {
             closeDiff()
         } else {
             diffFile = file
@@ -386,7 +392,7 @@ final class WorkspaceModel {
         let worker = Task.detached(priority: .userInitiated) { try load() }
         diffTask = Task { [weak self] in
             let result = await withTaskCancellationHandler { await worker.result } onCancel: { worker.cancel() }
-            guard let self, !Task.isCancelled, self.diffFile == file else { return }
+            guard let self, !Task.isCancelled, self.diffFile?.path == file.path else { return }
             switch result {
             case .success(let diff):
                 self.fileDiff = diff
