@@ -51,10 +51,15 @@ enum RepositoryScore {
     }
 
     /// Branches the server has but the base does not, unfinished, or merged and left behind.
-    /// Unpushed ones belong to the commits above.
+    /// Unpushed ones belong to the commits above. A merged branch someone is on, in the main worktree
+    /// or under uncommitted edits, is in use, however old its last commit.
     static func mergeWork(branches: [BranchSnapshot], worktrees: [WorktreeSnapshot]) -> [(branch: BranchSnapshot, kind: UnsavedWork)] {
-        branches.filter { !$0.isBase && !$0.isUnrelated && $0.unpushedCommits == 0 }
-            .map { ($0, $0.unmergedCommits > 0 ? .unmerged : .leftover) }
+        let inUse = Set(worktrees.filter { $0.isMain || $0.dirtyFileCount > 0 }.compactMap(\.branch))
+        return branches.filter { !$0.isBase && !$0.isUnrelated && $0.unpushedCommits == 0 }
+            .compactMap { branch in
+                if branch.unmergedCommits > 0 { return (branch, .unmerged) }
+                return inUse.contains(branch.name) ? nil : (branch, .leftover)
+            }
     }
 }
 
