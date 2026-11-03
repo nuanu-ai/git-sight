@@ -64,6 +64,8 @@ public struct BranchSnapshot: Equatable {
     public let isBase: Bool
     /// Commits the base does not have. A branch squash-merged into the base counts as merged: zero.
     public let unmergedCommits: Int
+    /// No history in common with the base, like a gh-pages branch: neither merged nor unfinished.
+    public let isUnrelated: Bool
 
     public init(
         name: String,
@@ -75,7 +77,8 @@ public struct BranchSnapshot: Equatable {
         unpushedCommits: Int = 0,
         upstreamGone: Bool = false,
         isBase: Bool = false,
-        unmergedCommits: Int = 0
+        unmergedCommits: Int = 0,
+        isUnrelated: Bool = false
     ) {
         self.name = name
         self.upstream = upstream
@@ -87,6 +90,7 @@ public struct BranchSnapshot: Equatable {
         self.upstreamGone = upstreamGone
         self.isBase = isBase
         self.unmergedCommits = unmergedCommits
+        self.isUnrelated = isUnrelated
     }
 }
 
