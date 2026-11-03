@@ -15,6 +15,8 @@ final class WorkspaceModel {
     private static let rootKey = "rootPath"
     /// Coming back to the app rescans only if the last result is older than this.
     private static let refreshInterval: TimeInterval = 60
+    /// A window left open rescans this often, for new repositories and work that aged into a new verdict.
+    private static let periodicScanInterval: Duration = .seconds(5 * 60)
 
     private(set) var rootURL: URL?
     private(set) var repositories: [RepositorySnapshot] = []
@@ -55,6 +57,10 @@ final class WorkspaceModel {
     private(set) var commitFilesError: String?
 
     private var scanTask: Task<Void, Never>?
+    /// Follows edits, commits and stashes as they happen; replaced after every scan.
+    private var watcher: RepositoryWatcher?
+    private var changedPaths: Set<URL> = []
+    private var changeTask: Task<Void, Never>?
     /// Tells a scan's late progress and result apart from those of the scan that replaced it.
     private var scanID: UUID?
     private var contentTask: Task<Void, Never>?
@@ -63,6 +69,13 @@ final class WorkspaceModel {
     init() {
         if let path = UserDefaults.standard.string(forKey: Self.rootKey) {
             rootURL = URL(fileURLWithPath: path, isDirectory: true)
+        }
+        Task { [weak self] in
+            while true {
+                try? await Task.sleep(for: Self.periodicScanInterval)
+                guard let self else { return }
+                self.refreshIfStale()
+            }
         }
     }
 
@@ -102,6 +115,7 @@ final class WorkspaceModel {
         UserDefaults.standard.set(url.path, forKey: Self.rootKey)
         if url != rootURL {
             rootURL = url
+            watcher = nil
             repositories = []
             selectedPath = nil
             lastScanDate = nil
@@ -157,25 +171,68 @@ final class WorkspaceModel {
     }
 
     private func apply(_ result: RepositoryScanResult) {
+        scanFailures = result.failures
+        lastScanDate = Date()
+        show(result.repositories)
+        watch()
+    }
+
+    /// Shows new snapshots and keeps the user's place, down to the selected commit.
+    /// `changed` limits which repositories' content reloads; nil means all of them.
+    private func show(_ snapshots: [RepositorySnapshot], changed: Set<URL>? = nil) {
         let previousFinding = selectedFindingID
-        repositories = result.repositories.sorted {
+        repositories = snapshots.sorted {
             if $0.severity != $1.severity { return $0.severity > $1.severity }
             if $0.oldestUnsavedWork != $1.oldestUnsavedWork {
                 return ($0.oldestUnsavedWork ?? .distantFuture) < ($1.oldestUnsavedWork ?? .distantFuture)
             }
             return $0.name.localizedStandardCompare($1.name) == .orderedAscending
         }
-        scanFailures = result.failures
-        lastScanDate = Date()
         if selectedRepository == nil {
             selectedPath = repositories.first?.path
-        } else if let repository = selectedRepository {
-            // A rescan keeps the user's place, down to the selected commit.
+        } else if let repository = selectedRepository, changed?.contains(repository.path) ?? true {
             if repository.findings.contains(where: { $0.id == previousFinding }) {
                 loadContent(refreshing: true)
             } else {
                 selectedFindingID = repository.findings.first?.id
             }
+        }
+    }
+
+    private func watch() {
+        watcher = RepositoryWatcher(repositories: repositories) { [weak self] paths in
+            Task { @MainActor in self?.repositoriesChanged(paths) }
+        }
+    }
+
+    /// Rereads only the repositories that changed, once a burst of writes has settled.
+    private func repositoriesChanged(_ paths: Set<URL>) {
+        changedPaths.formUnion(paths)
+        guard changeTask == nil else { return }
+        changeTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(400))
+            while let self, !self.changedPaths.isEmpty, !self.isScanning {
+                let paths = self.changedPaths
+                self.changedPaths = []
+                let snapshots = await Task.detached(priority: .userInitiated) {
+                    paths.compactMap { try? RepositoryInspector().inspect(repositoryAt: $0) }
+                }.value
+                // A scan that started meanwhile brings newer results of its own.
+                guard !self.isScanning else { break }
+                var updated = self.repositories
+                for snapshot in snapshots {
+                    if let index = updated.firstIndex(where: { $0.path == snapshot.path }) {
+                        updated[index] = snapshot
+                    }
+                }
+                let worktreesBefore = Set(self.repositories.flatMap { $0.worktrees.map(\.path) })
+                self.show(updated, changed: paths)
+                // A new or removed worktree needs a watcher that covers it.
+                if Set(self.repositories.flatMap { $0.worktrees.map(\.path) }) != worktreesBefore {
+                    self.watch()
+                }
+            }
+            self?.changeTask = nil
         }
     }
 

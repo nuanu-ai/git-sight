@@ -131,9 +131,43 @@ private struct RepositorySidebar: View {
     @Bindable var model: WorkspaceModel
     @AppStorage("showsCleanRepositories") private var showsClean = false
 
+    /// Changes newer than this put a repository under "Сейчас".
+    private static let activeWindow: TimeInterval = 15 * 60
+
     var body: some View {
-        let repositories = model.filteredRepositories
-        List(selection: $model.selectedPath) {
+        // Re-evaluated every half minute so repositories leave "Сейчас" once they go quiet.
+        TimelineView(.periodic(from: .now, by: 30)) { timeline in
+            list(now: timeline.date)
+        }
+        .listStyle(.sidebar)
+        .overlay {
+            if model.filteredRepositories.isEmpty {
+                ContentUnavailableView.search(text: model.filter)
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            SidebarFooter(model: model)
+        }
+    }
+
+    private func list(now: Date) -> some View {
+        let all = model.filteredRepositories
+        let active = all
+            .compactMap { repository in repository.latestChange.map { (repository, $0) } }
+            .filter { abs(now.timeIntervalSince($0.1.date)) < Self.activeWindow }
+            .sorted { $0.1.date > $1.1.date }
+        let activePaths = Set(active.map(\.0.path))
+        let repositories = all.filter { !activePaths.contains($0.path) }
+        return List(selection: $model.selectedPath) {
+            if !active.isEmpty {
+                Section {
+                    ForEach(active, id: \.0.path) { repository, change in
+                        RepositoryRow(repository: repository, activity: change)
+                    }
+                } header: {
+                    ActivityHeader(count: active.count)
+                }
+            }
             ForEach([Severity.critical, .warning, .attention], id: \.self) { severity in
                 let group = repositories.filter { $0.severity == severity }
                 if !group.isEmpty {
@@ -157,20 +191,13 @@ private struct RepositorySidebar: View {
                 }
             }
         }
-        .listStyle(.sidebar)
-        .overlay {
-            if repositories.isEmpty {
-                ContentUnavailableView.search(text: model.filter)
-            }
-        }
-        .safeAreaInset(edge: .bottom) {
-            SidebarFooter(model: model)
-        }
     }
 }
 
 private struct RepositoryRow: View {
     let repository: RepositorySnapshot
+    /// Under "Сейчас" the row tells what just happened instead of what is at stake.
+    var activity: (date: Date, text: String)?
 
     var body: some View {
         HStack(spacing: 8) {
@@ -181,13 +208,18 @@ private struct RepositoryRow: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(repository.name)
                     .lineLimit(1)
-                Text(repository.summary)
+                Text(activity?.text ?? repository.summary)
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
             Spacer(minLength: 4)
-            if let oldest = repository.oldestUnsavedWork {
+            if let activity {
+                Text(RepositoryText.age(activity.date, short: true))
+                    .font(.body)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            } else if let oldest = repository.oldestUnsavedWork {
                 Text(RepositoryText.age(oldest, short: true))
                     .font(.body)
                     .fontWeight(repository.severity >= .warning ? .semibold : .regular)
@@ -200,7 +232,7 @@ private struct RepositoryRow: View {
         .help(RepositoryText.path(repository.path))
         .contextMenu { RepositoryActions(repository: repository) }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(repository.name), \(repository.severity.title), \(repository.summary)")
+        .accessibilityLabel("\(repository.name), \(repository.severity.title), \(activity?.text ?? repository.summary)")
     }
 }
 
@@ -277,6 +309,24 @@ private struct SeverityBadge: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 2)
             .background(Capsule().fill(severity.color))
+    }
+}
+
+private struct ActivityHeader: View {
+    let count: Int
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "dot.radiowaves.left.and.right")
+                .foregroundStyle(Color.accentColor)
+            Text("Сейчас")
+                .font(.headline)
+                .foregroundStyle(.primary)
+            Text("\(count)")
+                .font(.headline)
+                .foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 

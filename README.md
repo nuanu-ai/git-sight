@@ -26,9 +26,9 @@ A branch whose upstream was deleted on the server stays "В работе" howeve
 
 ## Using it
 
-Pick the folder that holds your repositories. git-sight remembers it, scans every repository inside (skipping hidden folders, `Library` and `node_modules`), and rescans when you come back to the app, at most once a minute.
+Pick the folder that holds your repositories. git-sight remembers it and scans every repository inside, skipping hidden folders, `Library` and `node_modules`. After that it follows the repositories as they change: an FSEvents stream watches their folders and worktrees, and an edit, commit or stash shows up within a second, without rescanning everything. A full rescan still runs when you come back to the app and every five minutes while it is open.
 
-The window has three columns: repositories grouped by verdict, the findings of the selected repository, and the detail of one finding. A branch shows the commits that are not on the server, down to the commit the server already has; click a commit to see its files. Uncommitted work and stashes show their files.
+The window has three columns: repositories, the findings of the selected repository, and the detail of one finding. Repositories changed in the last 15 minutes sit at the top under "Сейчас" with what just happened, so you can watch several agents work at once. The rest are grouped by verdict. A branch shows the commits that are not on the server, down to the commit the server already has; click a commit to see its files. Uncommitted work and stashes show their files.
 
 "Скопировать задачу для агента" puts a self-contained request on the clipboard: what was found, where, and what to do about it. It always ends by telling the agent not to delete anything without asking you.
 
