@@ -397,4 +397,32 @@ enum CommitTopologyIntegrationTests {
         let pruned = try RepositoryInspector().repositoryHistory(in: repositoryURL)
         try expectEqual(pruned.flatMap(\.refs).filter { $0.kind == .worktree }, [], "a deleted worktree gets no label")
     }
+
+    static func testBranchHistoryKeepsWhatTheServerHasBelowLocalWork() throws {
+        let rootURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent(".build/GitSightTests/\(UUID().uuidString)", isDirectory: true)
+        let originURL = rootURL.appendingPathComponent("origin.git")
+        let repositoryURL = rootURL.appendingPathComponent("repository")
+        try FileManager.default.createDirectory(at: repositoryURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        try runGit(in: rootURL, ["init", "--bare", originURL.path])
+        try runGit(in: repositoryURL, ["init", "-b", "main"])
+        try runGit(in: repositoryURL, ["config", "user.name", "Test User"])
+        try runGit(in: repositoryURL, ["config", "user.email", "test@example.com"])
+        try runGit(in: repositoryURL, ["commit", "--allow-empty", "-m", "Server 1"])
+        try runGit(in: repositoryURL, ["commit", "--allow-empty", "-m", "Server 2"])
+        try runGit(in: repositoryURL, ["remote", "add", "origin", originURL.path])
+        try runGit(in: repositoryURL, ["push", "-u", "origin", "main"])
+        try runGit(in: repositoryURL, ["checkout", "-b", "feature"])
+        try runGit(in: repositoryURL, ["commit", "--allow-empty", "-m", "Local 1"])
+        try runGit(in: repositoryURL, ["commit", "--allow-empty", "-m", "Local 2"])
+
+        let history = try RepositoryInspector().history(of: ["refs/heads/feature"], in: repositoryURL)
+        try expectEqual(history.map(\.subject), ["Local 2", "Local 1", "Server 2", "Server 1"], "the branch's history goes on past what the server has")
+        try expectEqual(history.map(\.isUnpushed), [true, true, false, false], "only the commits the server lacks are marked")
+        try expectEqual(history.filter(\.isBoundary), [], "nothing is cut off at the server")
+    }
 }

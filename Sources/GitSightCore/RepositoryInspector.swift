@@ -121,6 +121,11 @@ public struct RepositoryInspector {
         return Self.laidOut(commits)
     }
 
+    /// The whole history behind `tips`, with commits that no remote branch holds marked.
+    public func history(of tips: [String], in repositoryURL: URL) throws -> [CommitSnapshot] {
+        []
+    }
+
     /// Every branch, remote branch and tag, and linked worktrees on no branch, as one graph.
     public func repositoryHistory(in repositoryURL: URL) throws -> [CommitSnapshot] {
         // Linked worktrees on no branch hold commits no ref reaches, often an agent's.
