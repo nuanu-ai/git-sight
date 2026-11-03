@@ -8,13 +8,17 @@ cd "$ROOT"
 
 VERSION=${1:-}
 case "$VERSION" in
-    '' | *[!0-9.]* | .* | *.)
+    '' | *[!0-9.]* | .* | *. | *..*)
         echo "usage: sh Scripts/release.sh <version>, for example 1.3" >&2
         exit 64
         ;;
 esac
 
 PLIST=Resources/Info.plist
+if [ "$(git rev-parse --abbrev-ref HEAD)" != main ] || [ -n "$(git status --porcelain)" ]; then
+    echo "Release from a clean main, so the zip matches the tag." >&2
+    exit 1
+fi
 if plutil -extract SUPublicEDKey raw "$PLIST" | grep -q REPLACE; then
     echo "SUPublicEDKey in $PLIST is still the placeholder. See Releasing in README.md." >&2
     exit 1
@@ -26,6 +30,11 @@ fi
 
 # Sparkle compares CFBundleVersion, so it has to grow with every release.
 BUILD=$(git rev-list --count HEAD)
+LAST=$(sed -n 's|.*<sparkle:version>\(.*\)</sparkle:version>.*|\1|p' appcast.xml | head -n 1)
+if [ -n "$LAST" ] && [ "$BUILD" -le "$LAST" ]; then
+    echo "Build $BUILD is not above the last released build $LAST. Was main rewritten?" >&2
+    exit 1
+fi
 plutil -replace CFBundleShortVersionString -string "$VERSION" "$PLIST"
 plutil -replace CFBundleVersion -string "$BUILD" "$PLIST"
 

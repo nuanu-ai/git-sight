@@ -22,8 +22,10 @@ plutil -lint "$APP/Contents/Info.plist"
 
 # SwiftPM points the binary at frameworks inside .build. Drop those paths so the app
 # loads only the Sparkle it carries.
-otool -l "$BIN" | awk '$1 == "path" { print $2 }' | grep "^$ROOT/" | while read -r path; do
-    install_name_tool -delete_rpath "$path" "$BIN"
+otool -l "$BIN" | sed -n 's/^ *path \(.*\) (offset [0-9]*)$/\1/p' | while IFS= read -r path; do
+    case "$path" in
+        "$ROOT"/*) install_name_tool -delete_rpath "$path" "$BIN" ;;
+    esac
 done
 install_name_tool -add_rpath @executable_path/../Frameworks "$BIN"
 

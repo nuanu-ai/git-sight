@@ -79,7 +79,7 @@ sh Scripts/release.sh 1.3
 
 The script sets the version, builds and signs `Artifacts/GitSight-1.3.zip`, adds it to `appcast.xml`, and prints the commands that publish it. It publishes nothing itself. Upload the zip before pushing `main`, so the appcast never points at a file that isn't there yet.
 
-The app is signed ad hoc, without a Developer ID, so after the first download macOS asks before opening it. Updates through Sparkle don't ask again.
+The app is signed ad hoc, without a Developer ID, so after the first download macOS blocks it until you allow it under System Settings → Privacy & Security → Open Anyway. Updates through Sparkle don't need that again.
 
 ## License
 
