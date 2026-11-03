@@ -196,7 +196,7 @@ private struct RepositorySidebar: View {
 
 private struct RepositoryRow: View {
     let repository: RepositorySnapshot
-    /// Under "Сейчас" the row tells what just happened instead of what is at stake.
+    /// Under "Сейчас" the row tells what just happened; the age on the right still says what is at stake.
     var activity: (date: Date, text: String)?
 
     var body: some View {
@@ -208,18 +208,13 @@ private struct RepositoryRow: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(repository.name)
                     .lineLimit(1)
-                Text(activity?.text ?? repository.summary)
+                Text(activity.map { "\($0.text) · \(RepositoryText.age($0.date, short: true))" } ?? repository.summary)
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
             Spacer(minLength: 4)
-            if let activity {
-                Text(RepositoryText.age(activity.date, short: true))
-                    .font(.body)
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-            } else if let oldest = repository.oldestUnsavedWork {
+            if let oldest = repository.oldestUnsavedWork {
                 Text(RepositoryText.age(oldest, short: true))
                     .font(.body)
                     .fontWeight(repository.severity >= .warning ? .semibold : .regular)
