@@ -281,10 +281,12 @@ public struct RepositoryInspector {
             }
             activeLanes[lane] = nil
 
-            for (offset, parent) in commit.parents.enumerated() where !activeLanes.contains(parent) {
+            for (offset, parent) in commit.parents.enumerated() {
                 if offset == 0 {
+                    // The first parent continues this line even when a side line already waits for it;
+                    // the parent then takes the leftmost of the lanes waiting for it.
                     activeLanes[lane] = parent
-                } else {
+                } else if !activeLanes.contains(parent) {
                     let parentLane = activeLanes.firstIndex(of: nil) ?? activeLanes.count
                     if parentLane == activeLanes.count {
                         activeLanes.append(parent)
