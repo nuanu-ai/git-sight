@@ -151,6 +151,27 @@ enum CommitTopologyIntegrationTests {
         try expectEqual(history.filter(\.isBoundary).map(\.subject), [], "a commit cut off by the history limit is not shown as the one the server has")
     }
 
+    static func testHistoryReadsFurtherWhenAskedForMore() throws {
+        let repositoryURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent(".build/GitSightTests/\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: repositoryURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: repositoryURL) }
+        try runGit(in: repositoryURL, ["init", "-b", "main"])
+        try runGit(in: repositoryURL, ["config", "user.name", "Test User"])
+        try runGit(in: repositoryURL, ["config", "user.email", "test@example.com"])
+        for index in 1...5 {
+            try runGit(in: repositoryURL, ["commit", "--allow-empty", "-m", "Commit \(index)"])
+        }
+
+        let inspector = RepositoryInspector()
+        try expectEqual(try inspector.history(of: ["HEAD"], in: repositoryURL, limit: 2).map(\.subject), ["Commit 5", "Commit 4"], "a history stops at its limit")
+        try expectEqual(try inspector.history(of: ["HEAD"], in: repositoryURL, limit: 4).map(\.subject), ["Commit 5", "Commit 4", "Commit 3", "Commit 2"], "a larger limit reads further back")
+        try expectEqual(try inspector.repositoryHistory(in: repositoryURL, limit: 3).count, 3, "the whole repository's graph reads as far as asked")
+    }
+
     static func testHistoryReadsRevisionsShadowedByFileNames() throws {
         let rootURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

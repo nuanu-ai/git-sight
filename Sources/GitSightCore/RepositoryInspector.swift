@@ -105,9 +105,12 @@ public struct RepositoryInspector {
         return files
     }
 
-    /// Commits `git log` reaches from `revisions`, newest first, with graph lanes.
+    /// How many commits a history reads at first and adds each time the user scrolls to its end.
+    public static let historyPage = 300
+
+    /// Commits `git log` reaches from `revisions`, newest first, with graph lanes, at most `limit` of them.
     /// Boundary commits mark where the range starts, e.g. what the server already has.
-    public func history(in repositoryURL: URL, revisions: [String]) throws -> [CommitSnapshot] {
+    public func history(in repositoryURL: URL, revisions: [String], limit: Int = historyPage) throws -> [CommitSnapshot] {
         let format = "%m%x1F%H%x1F%h%x1F%s%x1F%an%x1F%cI%x1F%P%x1F%D%x1E"
         let limit = 300
         // "--" keeps a file named like a revision, e.g. HEAD, from making git log ambiguous.
@@ -137,7 +140,7 @@ public struct RepositoryInspector {
     }
 
     /// The whole history behind `tips`, with commits that no remote branch holds marked.
-    public func history(of tips: [String], in repositoryURL: URL) throws -> [CommitSnapshot] {
+    public func history(of tips: [String], in repositoryURL: URL, limit: Int = historyPage) throws -> [CommitSnapshot] {
         try marked(history(in: repositoryURL, revisions: tips), tips: tips, in: repositoryURL)
     }
 
@@ -156,7 +159,7 @@ public struct RepositoryInspector {
     }
 
     /// Every branch, remote branch and tag, and linked worktrees on no branch, as one graph.
-    public func repositoryHistory(in repositoryURL: URL) throws -> [CommitSnapshot] {
+    public func repositoryHistory(in repositoryURL: URL, limit: Int = historyPage) throws -> [CommitSnapshot] {
         // Linked worktrees on no branch hold commits no ref reaches, often an agent's.
         // The first entry is the main worktree, whose HEAD the history reads anyway, or a bare repository.
         // A worktree folder deleted by hand is skipped, as inspect skips it.
