@@ -109,6 +109,7 @@ enum RepositoryInspectorIntegrationTests {
             ("commits name their branches and tags", CommitTopologyIntegrationTests.testCommitsNameTheirBranchesAndTags),
             ("repository history shows every branch and what is not on the server", CommitTopologyIntegrationTests.testRepositoryHistoryShowsEveryBranchAndWhatIsNotOnTheServer),
             ("branch history keeps what the server has below local work", CommitTopologyIntegrationTests.testBranchHistoryKeepsWhatTheServerHasBelowLocalWork),
+            ("diffs show what changed line by line", FileDiffIntegrationTests.testDiffsShowWhatChangedLineByLine),
             ("random histories draw without crossings", CommitTopologyIntegrationTests.testRandomHistoriesDrawWithoutCrossings),
             ("uncommitted and stashed files are listed", ChangedFilesIntegrationTests.testReportsUncommittedAndStashedFiles),
             ("stash keeps its files when another is pushed", ChangedFilesIntegrationTests.testStashKeepsItsFilesWhenAnotherIsPushed),

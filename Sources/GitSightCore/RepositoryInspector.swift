@@ -54,6 +54,21 @@ public struct RepositoryInspector {
         ])
     }
 
+    /// How one file changed in a commit, against its first parent.
+    public func diff(of path: String, in commit: CommitSnapshot, repositoryURL: URL) throws -> FileDiff {
+        FileDiff(lines: [])
+    }
+
+    /// How one uncommitted file differs from HEAD; an untracked file is all new.
+    public func uncommittedDiff(of file: CommitFileSnapshot, in worktreeURL: URL) throws -> FileDiff {
+        FileDiff(lines: [])
+    }
+
+    /// How one file in a stash differs from the commit it was stashed on.
+    public func stashDiff(of file: CommitFileSnapshot, stash: String, in repositoryURL: URL) throws -> FileDiff {
+        FileDiff(lines: [])
+    }
+
     /// Files a stash holds, including the untracked ones it saved.
     public func stashFiles(in repositoryURL: URL, stash: String) throws -> [CommitFileSnapshot] {
         try nameStatus(in: repositoryURL, [

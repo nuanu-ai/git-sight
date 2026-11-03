@@ -164,6 +164,42 @@ public struct CommitRef: Hashable {
     }
 }
 
+/// One line of a unified diff, numbered on the side or sides it exists on.
+public struct DiffLine: Equatable {
+    public enum Kind: Equatable {
+        /// "@@ -1,3 +1,4 @@", where a run of changes starts.
+        case hunk
+        case context
+        case added
+        case removed
+    }
+
+    public let kind: Kind
+    public let oldLine: Int?
+    public let newLine: Int?
+    public let text: String
+
+    public init(kind: Kind, oldLine: Int?, newLine: Int?, text: String) {
+        self.kind = kind
+        self.oldLine = oldLine
+        self.newLine = newLine
+        self.text = text
+    }
+}
+
+public struct FileDiff: Equatable {
+    public let lines: [DiffLine]
+    public let isBinary: Bool
+    /// Cut at `RepositoryInspector.diffLineLimit` lines.
+    public let isTruncated: Bool
+
+    public init(lines: [DiffLine], isBinary: Bool = false, isTruncated: Bool = false) {
+        self.lines = lines
+        self.isBinary = isBinary
+        self.isTruncated = isTruncated
+    }
+}
+
 public struct CommitFileSnapshot: Equatable {
     public let status: String
     public let path: String

@@ -270,7 +270,7 @@ enum CommitTopologyIntegrationTests {
         return crossings
     }
 
-    private static func gitOutput(in repositoryURL: URL, _ arguments: [String], environment: [String: String] = [:]) throws -> String {
+    static func gitOutput(in repositoryURL: URL, _ arguments: [String], environment: [String: String] = [:]) throws -> String {
         let process = Process()
         let output = Pipe()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
