@@ -300,28 +300,6 @@ private struct SeverityHeader: View {
     }
 }
 
-/// How bad the repository is and why, above its findings.
-private struct VerdictBanner: View {
-    let repository: RepositorySnapshot
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 8) {
-                SeverityBadge(severity: repository.severity)
-                Text(repository.reason)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(repository.severity.tint)
-            }
-            Text(repository.summary)
-                .font(.body)
-                .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
 // MARK: - Findings of one repository
 
 private struct FindingList: View {
@@ -343,14 +321,10 @@ private struct FindingList: View {
                              : "У репозитория нет remote, вся история есть только на этом компьютере.")
                     }
                 } else {
-                    VStack(spacing: 0) {
-                        VerdictBanner(repository: repository)
-                        Divider()
-                        List(selection: $model.selectedFindingID) {
-                            section("Не закоммичено", findings.filter { $0.kind == .uncommitted })
-                            section("Нет на сервере", findings.filter { $0.kind == .branch || $0.kind == .detached })
-                            section("Стэши", findings.filter { $0.kind == .stash })
-                        }
+                    List(selection: $model.selectedFindingID) {
+                        section("Не закоммичено", findings.filter { $0.kind == .uncommitted })
+                        section("Нет на сервере", findings.filter { $0.kind == .branch || $0.kind == .detached })
+                        section("Стэши", findings.filter { $0.kind == .stash })
                     }
                 }
             }
@@ -458,19 +432,15 @@ private struct FindingHeader: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
+            // One accent line: the badge names the verdict, the colored reason in the facts explains it.
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
                 SeverityBadge(severity: finding.severity)
-                Text(finding.reason)
-                    .fontWeight(.medium)
-                    .foregroundStyle(finding.severity.tint)
+                Text(finding.title)
+                    .font(.title2.weight(.semibold))
+                    .lineLimit(2)
+                    .textSelection(.enabled)
             }
-            .padding(.bottom, 2)
-            Text(finding.title)
-                .font(.title2.weight(.semibold))
-                .lineLimit(2)
-                .textSelection(.enabled)
-            Text(facts)
-                .foregroundStyle(.secondary)
+            facts
             Text(RepositoryText.path(finding.location))
                 .font(.body.monospaced())
                 .foregroundStyle(.secondary)
@@ -522,8 +492,12 @@ private struct FindingHeader: View {
         .help(title)
     }
 
-    private var facts: String {
-        [finding.detail, finding.note].compactMap { $0 }.joined(separator: " · ")
+    private var facts: Text {
+        let reason = Text(finding.reason)
+            .fontWeight(finding.severity >= .warning ? .medium : .regular)
+            .foregroundStyle(finding.severity.tint)
+        let rest = [finding.detail, finding.note].compactMap { $0 }.joined(separator: " · ")
+        return Text("\(rest) · ").foregroundStyle(.secondary) + reason
     }
 }
 

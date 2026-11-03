@@ -230,14 +230,6 @@ extension RepositorySnapshot {
         return findings.sorted { ($0.date ?? .distantFuture) < ($1.date ?? .distantFuture) }
     }
 
-    /// Why the repository has its severity: the reason of its oldest worst finding.
-    var reason: String {
-        // A branch the server deleted is only a notice; any other work explains the verdict better.
-        let candidates = findings.filter { $0.severity == severity }
-        let worst = candidates.first { $0.work != .commits(upstreamGone: true) } ?? candidates.first
-        return worst?.reason ?? (hasRemote ? "всё на сервере" : "нет remote, история только на этом компьютере")
-    }
-
     /// One line for the sidebar: what is at stake.
     var summary: String {
         var parts: [String] = []
