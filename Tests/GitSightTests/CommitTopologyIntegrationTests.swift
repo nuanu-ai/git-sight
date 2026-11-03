@@ -375,6 +375,10 @@ enum CommitTopologyIntegrationTests {
         )
         try expectEqual(history.filter(\.isBoundary), [], "a whole repository has no range to stop at")
 
+        try runGit(in: repositoryURL, ["checkout", "--detach", "main"])
+        let detachedMain = try RepositoryInspector().repositoryHistory(in: repositoryURL).first { $0.subject == "Pushed" }
+        try expectEqual(detachedMain?.refs.filter { $0.kind == .worktree }, [], "a detached main worktree is HEAD, not a linked worktree")
+
         let localURL = rootURL.appendingPathComponent("local")
         try FileManager.default.createDirectory(at: localURL, withIntermediateDirectories: true)
         try runGit(in: localURL, ["init", "-b", "main"])

@@ -123,7 +123,27 @@ public struct RepositoryInspector {
 
     /// Every branch, remote branch and tag, and linked worktrees on no branch, as one graph.
     public func repositoryHistory(in repositoryURL: URL) throws -> [CommitSnapshot] {
-        []
+        // Linked worktrees on no branch hold commits no ref reaches, often an agent's.
+        // The first entry is the main worktree, whose HEAD the history reads anyway, or a bare repository.
+        let detached = try worktreeEntries(in: repositoryURL).dropFirst().compactMap { entry in
+            entry.branch == nil ? entry.head.map { (name: entry.path.lastPathComponent, head: $0) } : nil
+        }
+        let tips = ["--branches", "HEAD"] + detached.map(\.head)
+        var commits = try history(in: repositoryURL, revisions: tips + ["--remotes", "--tags"])
+        for (name, head) in detached {
+            if let index = commits.firstIndex(where: { $0.fullHash == head }) {
+                commits[index].refs.append(CommitRef(kind: .worktree, name: name))
+            }
+        }
+        // Without a remote nothing could be pushed, so marking every commit would say nothing.
+        guard try !git.output(in: repositoryURL, ["remote"]).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return commits
+        }
+        let unpushed = Set(try git.output(in: repositoryURL, ["rev-list"] + tips + ["--not", "--remotes", "--"]).split(separator: "\n").map(String.init))
+        for index in commits.indices where unpushed.contains(commits[index].fullHash) {
+            commits[index].isUnpushed = true
+        }
+        return commits
     }
 
     /// Reads %D written with --decorate=full, e.g. "HEAD -> refs/heads/main, refs/remotes/origin/main, tag: refs/tags/v1".
