@@ -3,5 +3,14 @@
   <channel>
     <title>git-sight</title>
     <link>https://github.com/nuanu-ai/git-sight</link>
+    <item>
+      <title>0.1.0</title>
+      <pubDate>Tue, 03 Nov 2026 13:22:57 +0000</pubDate>
+      <link>https://github.com/nuanu-ai/git-sight/releases/tag/v0.1.0</link>
+      <sparkle:version>162</sparkle:version>
+      <sparkle:shortVersionString>0.1.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/nuanu-ai/git-sight/releases/download/v0.1.0/GitSight-0.1.0.zip" type="application/octet-stream" sparkle:edSignature="6HlS0Xw6QZRDjiKZDETGPxabSZHqYXJE92mHa6LzXcU09ILGkLvflInKHYqZbV/ZrqgwM6VjCm7HAI/L6eiWBg==" length="2704601" />
+    </item>
   </channel>
 </rss>
