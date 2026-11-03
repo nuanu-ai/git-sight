@@ -24,6 +24,9 @@ enum UnfinishedWorkIntegrationTests {
             try runGit(in: repositoryURL, ["commit", "-m", "\(name): \(text)"], environment: daysAgo(days))
         }
         try commit("readme.txt", "start\n", days: 40)
+        try commit("legacy-a.txt", "old\n", days: 40)
+        try commit("legacy-b.txt", "old\n", days: 40)
+        try commit("legacy-c.txt", "old\n", days: 40)
         try runGit(in: repositoryURL, ["remote", "add", "origin", originURL.path])
         try runGit(in: repositoryURL, ["push", "-u", "origin", "trunk"])
         // The server says which branch is the default, as a clone records it.
@@ -44,8 +47,27 @@ enum UnfinishedWorkIntegrationTests {
         try commit("partial-a.txt", "a\n", days: 20)
         try commit("partial-b.txt", "b\n", days: 20)
         try runGit(in: repositoryURL, ["push", "-u", "origin", "partial"])
+        // Deleting a file is work too: each of these branches adds one file and deletes another.
+        for (branch, deleted) in [("cleanup", "legacy-a.txt"), ("trimmed", "legacy-b.txt")] {
+            try runGit(in: repositoryURL, ["checkout", "-b", branch, "trunk"])
+            try commit("\(branch).txt", "first\n", days: 30)
+            try runGit(in: repositoryURL, ["rm", "-q", deleted])
+            try runGit(in: repositoryURL, ["commit", "-m", "Delete \(deleted)"], environment: daysAgo(30))
+            try runGit(in: repositoryURL, ["push", "-u", "origin", branch])
+        }
+        // A branch that only deletes, never merged.
+        try runGit(in: repositoryURL, ["checkout", "-b", "prune", "trunk"])
+        try runGit(in: repositoryURL, ["rm", "-q", "legacy-c.txt"])
+        try runGit(in: repositoryURL, ["commit", "-m", "Delete legacy-c.txt"], environment: daysAgo(20))
+        try runGit(in: repositoryURL, ["push", "-u", "origin", "prune"])
         try runGit(in: repositoryURL, ["checkout", "trunk"])
         try runGit(in: repositoryURL, ["cherry-pick", "partial~1"], environment: daysAgo(19))
+        // trunk takes the new file of cleanup but keeps the file it deleted.
+        try runGit(in: repositoryURL, ["cherry-pick", "cleanup~1"], environment: daysAgo(19))
+        // trimmed is squashed in whole, its deletion too, and trunk edits its new file again.
+        try runGit(in: repositoryURL, ["merge", "--squash", "trimmed"])
+        try runGit(in: repositoryURL, ["commit", "-m", "Squash trimmed"], environment: daysAgo(25))
+        try commit("trimmed.txt", "first\nmore\n", days: 24)
         try runGit(in: repositoryURL, ["merge", "--no-ff", "merged", "-m", "Merge merged"], environment: daysAgo(25))
         try runGit(in: repositoryURL, ["merge", "--squash", "squashed"])
         try runGit(in: repositoryURL, ["commit", "-m", "Squash squashed"], environment: daysAgo(25))
@@ -80,6 +102,9 @@ enum UnfinishedWorkIntegrationTests {
         try expectEqual(branches["merged"]?.unmergedCommits, 0, "a branch merged with a merge commit is in the base")
         try expectEqual(branches["squashed"]?.unmergedCommits, 0, "a branch squashed into the base is in it too, though the base edited it since")
         try expectEqual(branches["partial"]?.unmergedCommits, 2, "a branch the base has only part of is not merged")
+        try expectEqual(branches["cleanup"]?.unmergedCommits, 2, "a branch whose deletion the base lacks is not merged")
+        try expectEqual(branches["prune"]?.unmergedCommits, 1, "a branch that only deletes is not merged until the base deletes too")
+        try expectEqual(branches["trimmed"]?.unmergedCommits, 0, "a branch squashed with its deletion is merged, though the base edited it since")
         try expectEqual(branches["fix"]?.isBase, false, "a branch that tracks the server's trunk is not the base")
         try expectEqual(branches["fix"]?.unmergedCommits, 1, "and its work is not in the base")
         try expectEqual(branches["pages"]?.isUnrelated, true, "a branch with no history in common with the base is apart from it")
