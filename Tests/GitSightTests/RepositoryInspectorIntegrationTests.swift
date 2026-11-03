@@ -111,6 +111,7 @@ enum RepositoryInspectorIntegrationTests {
             ("branch history keeps what the server has below local work", CommitTopologyIntegrationTests.testBranchHistoryKeepsWhatTheServerHasBelowLocalWork),
             ("history reads further when asked for more", CommitTopologyIntegrationTests.testHistoryReadsFurtherWhenAskedForMore),
             ("reading never runs programs from repository config", GitSafetyIntegrationTests.testReadingNeverRunsProgramsFromRepositoryConfig),
+            ("filters the user set up still apply", GitSafetyIntegrationTests.testFiltersTheUserSetUpStillApply),
             ("diffs show what changed line by line", FileDiffIntegrationTests.testDiffsShowWhatChangedLineByLine),
             ("random histories draw without crossings", CommitTopologyIntegrationTests.testRandomHistoriesDrawWithoutCrossings),
             ("uncommitted and stashed files are listed", ChangedFilesIntegrationTests.testReportsUncommittedAndStashedFiles),
