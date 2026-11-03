@@ -1,34 +1,74 @@
 # git-sight
 
-A native macOS app that shows abandoned work across your git repositories: worktrees left behind by AI agents, branches that were never pushed, old stashes, uncommitted changes in repos where origin has moved ahead.
+A native macOS app that finds work you left behind in your git repositories: branches you never pushed, stashes you forgot, uncommitted edits, commits stranded in a worktree an agent created and abandoned.
 
-It only shows. Deciding what to do about it stays with you.
+It never changes a repository. When something needs fixing, copy a ready-made task for your coding agent and let it do the work.
+
+## What counts as left behind
+
+git-sight looks for work that exists only on this machine:
+
+- uncommitted files in any worktree, dated by the newest file change;
+- local branches with commits that no remote-tracking branch contains;
+- commits on a detached HEAD that no branch, tag or remote holds;
+- stashes.
+
+Each piece gets a verdict by how long it has gone untouched:
+
+| Verdict | Meaning |
+| --- | --- |
+| Забыто | untouched for over 30 days |
+| Заброшено | untouched for over 3 days (a stash: over 1 day) |
+| В работе | fresh work, or a repository with no remote at all |
+| Чисто | everything is on the server |
+
+A branch whose upstream was deleted on the server stays "В работе" however old it is. That is what a squash merge leaves behind, and git cannot tell it apart from lost work. A repository is as bad as its worst piece of work.
+
+## Using it
+
+Pick the folder that holds your repositories. git-sight remembers it, scans every repository inside (skipping hidden folders, `Library` and `node_modules`), and rescans when you come back to the app, at most once a minute.
+
+The window has three columns: repositories grouped by verdict, the findings of the selected repository, and the detail of one finding. A branch shows the commits that are not on the server, down to the commit the server already has; click a commit to see its files. Uncommitted work and stashes show their files.
+
+"Скопировать задачу для агента" puts a self-contained request on the clipboard: what was found, where, and what to do about it. It always ends by telling the agent not to delete anything without asking you.
+
+The interface is in Russian for now.
+
+## Read-only by design
+
+Every git call runs with `--no-optional-locks`, hooks pointed at `/dev/null`, fsmonitor off, and `GIT_*` variables removed from the environment, so reading a repository does not take its locks or run its hooks. An integration test plants an fsmonitor hook and checks that a scan never fires it.
 
 ## Build and run
 
-Requires macOS 14 or later and a Swift toolchain.
+Requires macOS 14 or later and a Swift toolchain. Command Line Tools are enough.
 
 ```sh
-swift run GitSight
+sh Scripts/package_app.sh
+open Artifacts/GitSight.app
 ```
 
-Choose a folder and start the scan explicitly. The app never changes repository contents.
+`swift run GitSight` also works, but a bare executable often opens its window behind the terminal.
 
-Run the integration tests with:
+## Development
+
+Run the integration tests:
 
 ```sh
 swift run GitSightTests
 ```
 
-Build a standalone app bundle in `Artifacts/GitSight.app`:
+`swift test` needs Xcode, so the tests are a plain executable.
+
+To look at the window without pointing it at real work, build a folder of made-up repositories that covers every verdict and render the window to a PNG:
 
 ```sh
-sh Scripts/package_app.sh
+python3 Scripts/make_demo_workspace.py
+sh Scripts/render_window.sh window.png .build/DemoWorkspace billing-service branch 1360 860 light
 ```
 
-## Contributing
+The sidebar and toolbar are drawn with live glass, which an offscreen capture cannot see, so they come out blank in the PNG.
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md) for the test-first workflow, mutation checks, and review policy.
+Read [CONTRIBUTING.md](CONTRIBUTING.md) for the test-first workflow, mutation checks and review policy.
 
 ## License
 
