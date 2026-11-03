@@ -58,21 +58,31 @@ struct CommitGraph: View {
     var body: some View {
         let rows = rows
         let lanes = rowLanes(rows)
-        ScrollView {
-            ZStack(alignment: .topLeading) {
-                rails(rows: rows)
-                    .frame(height: rowHeight * CGFloat(rows.count))
-                LazyVStack(spacing: 0) {
-                    ForEach(Array(rows.enumerated()), id: \.element.id) { index, item in
-                        row(item.row, indent: indent(lanes[index]))
-                            .frame(height: rowHeight)
-                            .onAppear {
-                                if index == rows.count - 1 { onReachEnd?() }
-                            }
+        ScrollViewReader { proxy in
+            ScrollView {
+                ZStack(alignment: .topLeading) {
+                    rails(rows: rows)
+                        .frame(height: rowHeight * CGFloat(rows.count))
+                    LazyVStack(spacing: 0) {
+                        ForEach(Array(rows.enumerated()), id: \.element.id) { index, item in
+                            row(item.row, indent: indent(lanes[index]))
+                                .frame(height: rowHeight)
+                                .onAppear {
+                                    if index == rows.count - 1 { onReachEnd?() }
+                                }
+                        }
                     }
                 }
+                .padding(.vertical, 4)
             }
-            .padding(.vertical, 4)
+            // The diff pane takes the lower part of the column; the clicked file scrolls back into view
+            // once the graph has its new height, so the same click can close it again.
+            .onChange(of: openFile?.path) { _, path in
+                guard let path, let hash = selection else { return }
+                DispatchQueue.main.async {
+                    withAnimation(.snappy(duration: 0.25)) { proxy.scrollTo("\(hash)|\(path)") }
+                }
+            }
         }
     }
 
