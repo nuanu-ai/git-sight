@@ -70,3 +70,29 @@ extension Severity {
         }
     }
 }
+
+/// The newest thing that happened in a repository, for watching work as it goes.
+public struct RecentChange: Equatable {
+    public enum Kind: Equatable {
+        case uncommitted(files: Int)
+        case commit
+        case stash
+    }
+
+    public let date: Date
+    /// The branch or worktree it happened in; nil for a stash.
+    public let place: String?
+    public let kind: Kind
+
+    public init(date: Date, place: String?, kind: Kind) {
+        self.date = date
+        self.place = place
+        self.kind = kind
+    }
+}
+
+extension RepositorySnapshot {
+    public var latestChange: RecentChange? {
+        nil
+    }
+}

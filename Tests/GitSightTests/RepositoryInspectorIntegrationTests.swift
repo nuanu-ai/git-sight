@@ -111,6 +111,7 @@ enum RepositoryInspectorIntegrationTests {
             ("stash keeps its files when another is pushed", ChangedFilesIntegrationTests.testStashKeepsItsFilesWhenAnotherIsPushed),
             ("watcher reports only the repository that changed", RepositoryWatcherIntegrationTests.testReportsOnlyTheRepositoryThatChanged),
             ("watcher reports a worktree outside the folder as its repository", RepositoryWatcherIntegrationTests.testReportsAWorktreeOutsideTheFolderAsItsRepository),
+            ("latest change follows the newest work", RecentChangeIntegrationTests.testLatestChangeFollowsTheNewestWork),
             ("watcher ignores files git ignores", RepositoryWatcherIntegrationTests.testIgnoredFilesAreNotChanges),
             ("watcher reports a repository in the temporary folder", RepositoryWatcherIntegrationTests.testReportsARepositoryInTheTemporaryFolder)
         ] {
