@@ -52,7 +52,7 @@ public struct RepositoryDiscovery {
                             domain: "GitSight.RepositoryDiscovery.Root",
                             code: nsError.code,
                             userInfo: [
-                                NSLocalizedDescriptionKey: "Чтение \(directoryURL.path): \(nsError.domain) \(nsError.code): \(nsError.localizedDescription)",
+                                NSLocalizedDescriptionKey: "Could not read \(directoryURL.path): \(nsError.domain) \(nsError.code): \(nsError.localizedDescription)",
                                 NSUnderlyingErrorKey: error
                             ]
                         )

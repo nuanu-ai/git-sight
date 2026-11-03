@@ -34,7 +34,7 @@ struct GitRunner {
                 domain: "GitSight.GitRunner.ProcessLaunch",
                 code: Int(code),
                 userInfo: [
-                    NSLocalizedDescriptionKey: "git \(arguments.joined(separator: " ")) в \(repositoryURL.path): \(underlying.domain) \(underlying.code): \(underlying.localizedDescription)",
+                    NSLocalizedDescriptionKey: "git \(arguments.joined(separator: " ")) in \(repositoryURL.path): \(underlying.domain) \(underlying.code): \(underlying.localizedDescription)",
                     NSUnderlyingErrorKey: underlying
                 ]
             )
@@ -177,7 +177,7 @@ struct GitRunner {
             throw NSError(
                 domain: "GitSight.GitRunner.Timeout",
                 code: Int(ETIMEDOUT),
-                userInfo: [NSLocalizedDescriptionKey: "git \(arguments.joined(separator: " ")) в \(repositoryURL.path): процесс остановлен через 60 секунд"]
+                userInfo: [NSLocalizedDescriptionKey: "git \(arguments.joined(separator: " ")) in \(repositoryURL.path): stopped after 60 seconds"]
             )
         }
         return GitResult(
@@ -261,7 +261,7 @@ struct GitRunner {
             throw NSError(
                 domain: "GitSight.GitRunner.Command",
                 code: Int(result.status),
-                userInfo: [NSLocalizedDescriptionKey: "git \(arguments.joined(separator: " ")) в \(repositoryURL.path): статус \(result.status): \(details.isEmpty ? "без сообщения" : details)"]
+                userInfo: [NSLocalizedDescriptionKey: "git \(arguments.joined(separator: " ")) in \(repositoryURL.path) exited with status \(result.status): \(details.isEmpty ? "no message" : details)"]
             )
         }
         return result.standardOutput

@@ -68,7 +68,7 @@ public struct RepositoryScanner {
         }, issue: { path, error in
             failures.append(RepositoryScanFailure(
                 path: path,
-                message: "Чтение каталога: \(error.domain) \(error.code): \(error.localizedDescription)"
+                message: "Could not read the folder: \(error.domain) \(error.code): \(error.localizedDescription)"
             ))
         })
 
