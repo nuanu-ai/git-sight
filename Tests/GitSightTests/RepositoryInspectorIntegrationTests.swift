@@ -73,6 +73,11 @@ enum RepositoryInspectorIntegrationTests {
             failures: &failures
         )
         await run(
+            name: "emptied linked worktree does not hide repository",
+            RepositorySnapshotIntegrationTests.testEmptiedLinkedWorktreeDoesNotHideRepository,
+            failures: &failures
+        )
+        await run(
             name: "inherited Git environment cannot redirect inspection",
             RepositorySnapshotIntegrationTests.testGitEnvironmentCannotRedirectInspection,
             failures: &failures

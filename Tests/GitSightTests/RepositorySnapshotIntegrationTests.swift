@@ -159,6 +159,32 @@ enum RepositorySnapshotIntegrationTests {
         try expectEqual(snapshot.worktrees.map(\.path), [repositoryURL], "missing worktree is omitted without pruning repository metadata")
     }
 
+    static func testEmptiedLinkedWorktreeDoesNotHideRepository() throws {
+        let repositoryURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent(".build/GitSightTests/\(UUID().uuidString)", isDirectory: true)
+        let linkedURL = repositoryURL.deletingLastPathComponent().appendingPathComponent("linked-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: repositoryURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: repositoryURL.deletingLastPathComponent()) }
+        try runGit(in: repositoryURL, ["init", "-b", "main"])
+        try runGit(in: repositoryURL, ["config", "user.name", "Test User"])
+        try runGit(in: repositoryURL, ["config", "user.email", "test@example.com"])
+        try "initial\n".write(to: repositoryURL.appendingPathComponent("tracked.txt"), atomically: true, encoding: .utf8)
+        try runGit(in: repositoryURL, ["add", "tracked.txt"])
+        try runGit(in: repositoryURL, ["commit", "-m", "Initial"])
+        try runGit(in: repositoryURL, ["worktree", "add", "--detach", linkedURL.path])
+        // What a cleaned-up agent worktree leaves behind: the folder, emptied, still registered.
+        for name in try FileManager.default.contentsOfDirectory(atPath: linkedURL.path) {
+            try FileManager.default.removeItem(at: linkedURL.appendingPathComponent(name))
+        }
+
+        let snapshot = try RepositoryInspector().inspect(repositoryAt: repositoryURL)
+        try expectEqual(snapshot.name, repositoryURL.lastPathComponent, "repository remains inspectable")
+        try expectEqual(snapshot.worktrees.map(\.path), [repositoryURL], "a folder that is no longer a checkout is omitted")
+    }
+
     static func testGitEnvironmentCannotRedirectInspection() throws {
         let rootURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
