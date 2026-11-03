@@ -175,6 +175,8 @@ final class WorkspaceModel {
         lastScanDate = Date()
         show(result.repositories)
         watch()
+        // Changes that came in while scanning may have landed after the scan read that repository.
+        if !changedPaths.isEmpty { repositoriesChanged([]) }
     }
 
     /// Shows new snapshots and keeps the user's place, down to the selected commit.
@@ -214,11 +216,12 @@ final class WorkspaceModel {
             while let self, !self.changedPaths.isEmpty, !self.isScanning {
                 let paths = self.changedPaths
                 self.changedPaths = []
+                let scanned = self.lastScanDate
                 let snapshots = await Task.detached(priority: .userInitiated) {
                     paths.compactMap { try? RepositoryInspector().inspect(repositoryAt: $0) }
                 }.value
-                // A scan that started meanwhile brings newer results of its own.
-                guard !self.isScanning else { break }
+                // A scan that started or finished meanwhile read these repositories later than this did.
+                guard !self.isScanning, self.lastScanDate == scanned else { break }
                 var updated = self.repositories
                 for snapshot in snapshots {
                     if let index = updated.firstIndex(where: { $0.path == snapshot.path }) {
