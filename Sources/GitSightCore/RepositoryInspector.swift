@@ -428,19 +428,52 @@ public struct RepositoryInspector {
     /// branch changed since it left the base reads the same in the base. Only reads, unlike a trial merge,
     /// which writes objects. A branch that touched over a thousand files, or one git cannot compare,
     /// as in a partial clone missing the trees, is left as not merged.
-    private func isSquashed(_ branch: String, since mergeBase: String, after date: String, into base: String, in repositoryURL: URL) -> Bool {
-        guard let listed = try? git.run(in: repositoryURL, ["diff-tree", "-r", "--name-only", "--no-renames", "-z", mergeBase, branch]),
-              listed.status == 0 else { return false }
-        let files = String(decoding: listed.standardOutput, as: UTF8.self).split(separator: "\0")
-        guard !files.isEmpty else { return true }
-        guard files.count <= 1000 else { return false }
-        let pathspec = ["--"] + files.map { ":(literal)\($0)" }
-        // The base may have edited those files again since. Then one of its commits after the branch's last
-        // held them as the branch left them; the squash lands soon after the work, so the oldest few are enough.
-        guard let touched = try? git.run(in: repositoryURL, ["rev-list", "--reverse", "--since=\(date)", base, "--not", mergeBase] + pathspec),
-              touched.status == 0 else { return false }
-        let states = [base] + String(decoding: touched.standardOutput, as: UTF8.self).split(separator: "\n").prefix(20).map(String.init)
-        return states.contains { (try? git.run(in: repositoryURL, ["diff-tree", "--quiet", "-r", $0, branch] + pathspec))?.status == 0 }
+    private func isSquashed(_ branch: String, since mergeBase: String, into base: String, in repositoryURL: URL) -> Bool {
+        // ":<old mode> <new mode> <old blob> <new blob> <status>" then the path: each file as the branch found
+        // it and as it left it.
+        guard let changed = try? git.run(in: repositoryURL, ["diff-tree", "-r", "--raw", "--no-abbrev", "--no-renames", "-z", mergeBase, branch]),
+              changed.status == 0 else { return false }
+        var held: [Substring: Substring] = [:]
+        var wanted: [Substring: Substring] = [:]
+        let output = String(decoding: changed.standardOutput, as: UTF8.self)
+        for change in Self.rawChanges(output[...]) {
+            held[change.path] = change.oldBlob
+            wanted[change.path] = change.newBlob
+        }
+        guard !wanted.isEmpty else { return true }
+        guard wanted.count <= 1000 else { return false }
+        let pathspec = ["--"] + wanted.keys.map { ":(literal)\($0)" }
+        if (try? git.run(in: repositoryURL, ["diff-tree", "--quiet", "-r", base, branch] + pathspec))?.status == 0 { return true }
+        // The base may have edited those files again since. Then, walking its own line of commits from where
+        // the branch left, one commit held every file as the branch left it.
+        guard let walk = try? git.run(in: repositoryURL, [
+            "log", "--first-parent", "--diff-merges=first-parent", "--reverse", "--raw", "--no-abbrev", "--no-renames", "-z",
+            "--format=%x01", base, "--not", mergeBase
+        ] + pathspec), walk.status == 0 else { return false }
+        for commit in String(decoding: walk.standardOutput, as: UTF8.self).split(separator: "\u{1}") {
+            for change in Self.rawChanges(commit) {
+                held[change.path] = change.newBlob
+            }
+            if held == wanted { return true }
+        }
+        return false
+    }
+
+    /// Changes in `--raw -z` output: ":<old mode> <new mode> <old blob> <new blob> <status>", then the path.
+    /// A blob of zeros, as on the missing side of an added or deleted file, reads as nil.
+    private static func rawChanges(_ output: Substring) -> [(oldBlob: Substring?, newBlob: Substring?, path: Substring)] {
+        let tokens = output.split(separator: "\0", omittingEmptySubsequences: false)
+        var changes: [(oldBlob: Substring?, newBlob: Substring?, path: Substring)] = []
+        var index = tokens.startIndex
+        while index < tokens.endIndex {
+            let fields = tokens[index].drop { $0 == "\n" }.split(separator: " ")
+            index += 1
+            guard fields.count == 5, fields[0].hasPrefix(":"), index < tokens.endIndex else { continue }
+            let blob = { (field: Substring) in field.allSatisfy { $0 == "0" } ? nil : field }
+            changes.append((blob(fields[2]), blob(fields[3]), tokens[index]))
+            index += 1
+        }
+        return changes
     }
 
     private func branches(in repositoryURL: URL, checkedOut: Set<String>, base: (ref: String, name: String)?) throws -> [BranchSnapshot] {
@@ -448,6 +481,11 @@ public struct RepositoryInspector {
         let output = try git.output(in: repositoryURL, [
             "for-each-ref", "--sort=refname", "--format=\(format)", "refs/heads"
         ])
+        // One call tells which branches the base lacks anything of; only those need their commits counted.
+        let notMerged = try base.map {
+            Set(try git.output(in: repositoryURL, ["for-each-ref", "--no-merged=\($0.ref)", "--format=%(refname)", "refs/heads"])
+                .split(separator: "\n").map(String.init))
+        } ?? []
         return try Self.records(output).map { record in
             let fields = Self.fields(record)
             guard fields.count >= 5 else { throw Self.parseError(record) }
@@ -457,12 +495,14 @@ public struct RepositoryInspector {
             let isBase = base.map { fields[0] == $0.name } ?? false
             var unmerged = 0
             var unrelated = false
-            if let base, !isBase {
+            // Work on no remote is counted as such; only work the server has is checked against the base.
+            let unpushedCount = try Self.count(unpushed)
+            if let base, !isBase, unpushedCount == 0, notMerged.contains(fields[4]) {
                 unmerged = try Self.count(git.output(in: repositoryURL, ["rev-list", "--count", fields[4], "--not", base.ref, "--"]))
                 if unmerged > 0 {
                     if let mergeBase = try git.optionalOutput(in: repositoryURL, ["merge-base", base.ref, fields[4]]) {
                         let since = mergeBase.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if isSquashed(fields[4], since: since, after: fields[2], into: base.ref, in: repositoryURL) { unmerged = 0 }
+                        if isSquashed(fields[4], since: since, into: base.ref, in: repositoryURL) { unmerged = 0 }
                     } else {
                         unrelated = true
                     }
@@ -475,7 +515,7 @@ public struct RepositoryInspector {
                 behind: Self.trackCount("behind", in: fields[3]),
                 lastCommitDate: Self.date(from: fields[2]),
                 hasWorktree: checkedOut.contains(fields[0]),
-                unpushedCommits: try Self.count(unpushed),
+                unpushedCommits: unpushedCount,
                 upstreamGone: fields[3] == "[gone]",
                 isBase: isBase,
                 unmergedCommits: unmerged,

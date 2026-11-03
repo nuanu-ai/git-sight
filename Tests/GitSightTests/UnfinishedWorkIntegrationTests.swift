@@ -35,7 +35,17 @@ enum UnfinishedWorkIntegrationTests {
             try commit("\(branch).txt", "first\nsecond\n", days: days)
             try runGit(in: repositoryURL, ["push", "-u", "origin", branch])
         }
+        // The squashed branch also adds notes the base never touches again.
+        try runGit(in: repositoryURL, ["checkout", "squashed"])
+        try commit("squashed-notes.txt", "notes\n", days: 30)
+        try runGit(in: repositoryURL, ["push", "origin", "squashed"])
+        // Only the first of its two files is carried over to trunk, as a cherry-pick does.
+        try runGit(in: repositoryURL, ["checkout", "-b", "partial", "trunk"])
+        try commit("partial-a.txt", "a\n", days: 20)
+        try commit("partial-b.txt", "b\n", days: 20)
+        try runGit(in: repositoryURL, ["push", "-u", "origin", "partial"])
         try runGit(in: repositoryURL, ["checkout", "trunk"])
+        try runGit(in: repositoryURL, ["cherry-pick", "partial~1"], environment: daysAgo(19))
         try runGit(in: repositoryURL, ["merge", "--no-ff", "merged", "-m", "Merge merged"], environment: daysAgo(25))
         try runGit(in: repositoryURL, ["merge", "--squash", "squashed"])
         try runGit(in: repositoryURL, ["commit", "-m", "Squash squashed"], environment: daysAgo(25))
@@ -69,6 +79,7 @@ enum UnfinishedWorkIntegrationTests {
         try expectEqual(branches["open"]?.unmergedCommits, 2, "a branch never merged has its commits outside the base")
         try expectEqual(branches["merged"]?.unmergedCommits, 0, "a branch merged with a merge commit is in the base")
         try expectEqual(branches["squashed"]?.unmergedCommits, 0, "a branch squashed into the base is in it too, though the base edited it since")
+        try expectEqual(branches["partial"]?.unmergedCommits, 2, "a branch the base has only part of is not merged")
         try expectEqual(branches["fix"]?.isBase, false, "a branch that tracks the server's trunk is not the base")
         try expectEqual(branches["fix"]?.unmergedCommits, 1, "and its work is not in the base")
         try expectEqual(branches["pages"]?.isUnrelated, true, "a branch with no history in common with the base is apart from it")

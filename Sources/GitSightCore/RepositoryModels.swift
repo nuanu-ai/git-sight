@@ -62,7 +62,8 @@ public struct BranchSnapshot: Equatable {
     public let upstreamGone: Bool
     /// The branch work is merged into: the server's default branch, or the local main without a server.
     public let isBase: Bool
-    /// Commits the base does not have. A branch squash-merged into the base counts as merged: zero.
+    /// Commits the base does not have, counted for branches whose commits are all on a remote; zero for the
+    /// rest. A branch squash-merged into the base counts as merged: zero.
     public let unmergedCommits: Int
     /// No history in common with the base, like a gh-pages branch: neither merged nor unfinished.
     public let isUnrelated: Bool
