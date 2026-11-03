@@ -16,11 +16,15 @@ WORKSPACE = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else ROOT / ".build
 # Hidden folders are skipped by the scan, so the fake servers do not show up as repositories.
 REMOTES = WORKSPACE / ".remotes"
 NOW = datetime.now(timezone.utc)
+# Marks a folder this script built, so a rebuild never deletes anything else.
+MARKER = ".git-sight-demo"
+# The user's own git config could sign commits with their key or run their hooks.
+ISOLATED = {"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1"}
 
 
 def git(repo, *args, days_ago=0):
     date = (NOW - timedelta(days=days_ago)).isoformat()
-    env = os.environ | {"GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date}
+    env = os.environ | ISOLATED | {"GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date}
     subprocess.run(["git", "-C", str(repo), *args], check=True, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
@@ -48,7 +52,7 @@ def repository(name, remote=True, history=4, days_ago=90):
         commit(repo, f"src/module{number}.txt", f"Add module {number + 1}", days_ago - number)
     if remote:
         origin = REMOTES / f"{name}.git"
-        subprocess.run(["git", "init", "--bare", "-b", "main", str(origin)], check=True, stdout=subprocess.DEVNULL)
+        subprocess.run(["git", "init", "--bare", "-b", "main", str(origin)], check=True, env=os.environ | ISOLATED, stdout=subprocess.DEVNULL)
         git(repo, "remote", "add", "origin", str(origin))
         git(repo, "push", "-u", "origin", "main")
     return repo
@@ -86,7 +90,7 @@ def docs_site():
     commit(repo, "guide/links.txt", "Fix broken links in the guide", 20)
     git(repo, "push", "-u", "origin", "fix/broken-links")
     git(repo, "checkout", "main")
-    subprocess.run(["git", "--git-dir", str(REMOTES / "docs-site.git"), "branch", "-D", "fix/broken-links"], check=True, stdout=subprocess.DEVNULL)
+    subprocess.run(["git", "--git-dir", str(REMOTES / "docs-site.git"), "branch", "-D", "fix/broken-links"], check=True, env=os.environ | ISOLATED, stdout=subprocess.DEVNULL)
     git(repo, "fetch", "--prune")
     write(repo, "guide/install.txt", "Install on macOS 14\n")
 
@@ -112,8 +116,12 @@ def clean(name):
 
 
 if __name__ == "__main__":
-    shutil.rmtree(WORKSPACE, ignore_errors=True)
+    if WORKSPACE.exists():
+        if any(WORKSPACE.iterdir()) and not (WORKSPACE / MARKER).exists():
+            sys.exit(f"{WORKSPACE} exists and was not built by this script; pick an empty or new folder")
+        shutil.rmtree(WORKSPACE)
     WORKSPACE.mkdir(parents=True)
+    (WORKSPACE / MARKER).touch()
     billing_service()
     mobile_app()
     docs_site()
