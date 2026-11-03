@@ -9,10 +9,11 @@ mkdir -p "$BUILD"
 cd "$BUILD"
 
 # The app is an executable target, so its views are compiled straight into the renderer.
+# The updater needs Sparkle, which only the package build links.
 swiftc -O -parse-as-library -module-name GitSightCore -emit-module -emit-library -static \
     "$ROOT"/Sources/GitSightCore/*.swift -o libGitSightCore.a
 swiftc -O -parse-as-library -I . -L . -lGitSightCore \
-    $(ls "$ROOT"/Sources/GitSight/*.swift | grep -v GitSightApp.swift) "$ROOT/VisualTests/Render.swift" -o render
+    $(ls "$ROOT"/Sources/GitSight/*.swift | grep -v -e GitSightApp.swift -e Updater.swift) "$ROOT/VisualTests/Render.swift" -o render
 
 cd "$ROOT"
 "$BUILD/render" "$@"

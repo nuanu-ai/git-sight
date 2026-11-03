@@ -184,7 +184,8 @@ private struct OverviewTotals: View {
             ForEach(WorkColumn.allCases) { column in
                 let value = repositories.reduce(0) { $0 + $1.column(column).value }
                 HStack(spacing: 4) {
-                    if !columns.compact { Color.clear.frame(width: 24, height: 1) }
+                    // The total starts where the title does: past the icon when there is one, else at the column edge.
+                    if columns.showsIcons { Color.clear.frame(width: 20, height: 1) }
                     if value > 0 {
                         Text(value.formatted()).fontWeight(.semibold)
                         Text(value == 1 ? column.unit.one : column.unit.many)
