@@ -9,6 +9,9 @@ struct CommitGraph: View {
     /// Files of the selected commit; nil while they load.
     let files: [CommitFileSnapshot]?
     let filesError: String?
+    /// The file whose diff is open, highlighted among the commit's files.
+    var openFile: CommitFileSnapshot?
+    var onOpenFile: ((CommitFileSnapshot) -> Void)?
     /// Called when the last row scrolls into view, to read further back.
     var onReachEnd: (() -> Void)?
 
@@ -93,6 +96,14 @@ struct CommitGraph: View {
             FileRow(file: file)
                 .padding(.leading, indent + 18)
                 .padding(.trailing, 14)
+                .background(
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill(file == openFile ? Color.accentColor.opacity(0.22) : .clear)
+                        .padding(.leading, indent + 12)
+                        .padding(.trailing, 8)
+                )
+                .contentShape(Rectangle())
+                .onTapGesture { onOpenFile?(file) }
         case .note(let text):
             HStack {
                 if let text {

@@ -10,7 +10,7 @@ enum VisualRenderer {
     static func main() async throws {
         let arguments = CommandLine.arguments
         guard arguments.count >= 8, let width = Int(arguments[5]), let height = Int(arguments[6]) else {
-            print("Usage: render <out.png> <folder> <repository|-> <uncommitted|branch|detached|stash|graph|-> <width> <height> <light|dark> [select]")
+            print("Usage: render <out.png> <folder> <repository|-> <uncommitted|branch|detached|stash|graph|-> <width> <height> <light|dark> [select|diff]")
             exit(2)
         }
         let output = URL(fileURLWithPath: arguments[1])
@@ -35,6 +35,14 @@ enum VisualRenderer {
         }
         if arguments.count > 8, case .history(let commits) = model.findingContent {
             model.selectedCommitHash = commits.first?.fullHash
+            for _ in 0..<60 where model.commitFiles == nil { try await Task.sleep(for: .milliseconds(50)) }
+        }
+        // "diff" also opens the first file's diff under the graph or the file list.
+        if arguments.count > 8, arguments[8] == "diff" {
+            var files = model.commitFiles
+            if case .files(let listed) = model.findingContent { files = listed }
+            if let file = files?.first { model.toggleDiff(of: file) }
+            for _ in 0..<60 where model.fileDiff == nil { try await Task.sleep(for: .milliseconds(50)) }
         }
 
         let window = NSWindow(

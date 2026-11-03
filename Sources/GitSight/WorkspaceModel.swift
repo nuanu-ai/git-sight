@@ -48,6 +48,7 @@ final class WorkspaceModel {
     var selectedCommitHash: String? {
         didSet {
             guard selectedCommitHash != oldValue else { return }
+            closeDiff()
             loadCommitFiles()
         }
     }
@@ -59,6 +60,11 @@ final class WorkspaceModel {
     private(set) var findingError: String?
     private(set) var commitFiles: [CommitFileSnapshot]?
     private(set) var commitFilesError: String?
+    /// The file whose diff is open under the graph or the file list.
+    private(set) var diffFile: CommitFileSnapshot?
+    /// Nil while it loads.
+    private(set) var fileDiff: FileDiff?
+    private(set) var fileDiffError: String?
 
     private var scanTask: Task<Void, Never>?
     /// Follows edits, commits and stashes as they happen; replaced after every scan.
@@ -69,6 +75,7 @@ final class WorkspaceModel {
     private var scanID: UUID?
     private var contentTask: Task<Void, Never>?
     private var commitTask: Task<Void, Never>?
+    private var diffTask: Task<Void, Never>?
 
     init() {
         if let path = UserDefaults.standard.string(forKey: Self.rootKey) {
@@ -259,6 +266,7 @@ final class WorkspaceModel {
         if !refreshing {
             historyLimit = RepositoryInspector.historyPage
             isLoadingMore = false
+            closeDiff()
             commitTask?.cancel()
             findingContent = nil
             commitFiles = nil
@@ -290,6 +298,10 @@ final class WorkspaceModel {
             switch result {
             case .success(let content):
                 self.findingContent = content
+                // The open diff follows the file as it changes, and closes when the file is gone.
+                if let file = self.diffFile, case .files(let files) = content {
+                    if files.contains(where: { $0.path == file.path }) { self.loadDiff(refreshing: true) } else { self.closeDiff() }
+                }
                 if case .history(let commits) = content, let hash = self.selectedCommitHash,
                    !commits.contains(where: { $0.fullHash == hash }) {
                     self.selectedCommitHash = nil
@@ -329,21 +341,69 @@ final class WorkspaceModel {
         }
     }
 
+    /// Where the shown history's commits live. "Все ветки" has no finding; its commits are the repository's.
+    private var historyDirectory: URL? {
+        if case .history(let directory, _) = selectedFinding?.source { return directory }
+        return showsGraph ? selectedRepository?.path : nil
+    }
+
+    /// Opens a file's diff, or closes it when that file's diff is already open.
+    func toggleDiff(of file: CommitFileSnapshot) {
+        if diffFile == file {
+            closeDiff()
+        } else {
+            diffFile = file
+            loadDiff()
+        }
+    }
+
+    func closeDiff() {
+        diffTask?.cancel()
+        diffFile = nil
+        fileDiff = nil
+        fileDiffError = nil
+    }
+
+    /// The diff of `diffFile` against the base its list was read from: the commit's first parent,
+    /// HEAD for uncommitted work, the stashed-on commit for a stash.
+    private func loadDiff(refreshing: Bool = false) {
+        diffTask?.cancel()
+        if !refreshing { fileDiff = nil }
+        fileDiffError = nil
+        guard let file = diffFile else { return }
+        let load: @Sendable () throws -> FileDiff
+        if case .history(let commits) = findingContent, let directory = historyDirectory,
+           let commit = commits.first(where: { $0.fullHash == selectedCommitHash }) {
+            load = { try RepositoryInspector().diff(of: file.path, in: commit, repositoryURL: directory) }
+        } else if case .uncommitted(let worktree) = selectedFinding?.source {
+            load = { try RepositoryInspector().uncommittedDiff(of: file, in: worktree) }
+        } else if case .stash(let directory, _, let hash) = selectedFinding?.source {
+            load = { try RepositoryInspector().stashDiff(of: file, stash: hash, in: directory) }
+        } else {
+            closeDiff()
+            return
+        }
+        let worker = Task.detached(priority: .userInitiated) { try load() }
+        diffTask = Task { [weak self] in
+            let result = await withTaskCancellationHandler { await worker.result } onCancel: { worker.cancel() }
+            guard let self, !Task.isCancelled, self.diffFile == file else { return }
+            switch result {
+            case .success(let diff):
+                self.fileDiff = diff
+            case .failure(let error):
+                if error is CancellationError { return }
+                self.fileDiffError = error.localizedDescription
+            }
+        }
+    }
+
     private func loadCommitFiles() {
         commitTask?.cancel()
         commitFiles = nil
         commitFilesError = nil
         guard case .history(let commits) = findingContent,
               let commit = commits.first(where: { $0.fullHash == selectedCommitHash }) else { return }
-        // "Все ветки" has no finding; its commits live in the repository itself.
-        let directory: URL
-        if case .history(let findingDirectory, _) = selectedFinding?.source {
-            directory = findingDirectory
-        } else if showsGraph, let repository = selectedRepository {
-            directory = repository.path
-        } else {
-            return
-        }
+        guard let directory = historyDirectory else { return }
         let hash = commit.fullHash
         let worker = Task.detached(priority: .userInitiated) {
             try RepositoryInspector().changedFiles(in: directory, commit: commit)

@@ -406,9 +406,11 @@ private struct FindingRow: View {
                     .foregroundStyle(finding.severity.tint)
                     .frame(width: 18)
                     .accessibilityHidden(true)
-                Text(finding.title)
+                // The name alone repeats: a worktree on main and the branch main are both "main".
+                // What kind of work it is follows the name.
+                (Text(finding.title) + Text("  \(finding.detail)").foregroundStyle(.secondary))
                     .lineLimit(1)
-                    .truncationMode(.middle)
+                    .truncationMode(.tail)
             }
             Spacer(minLength: 4)
             Text(RepositoryText.age(finding.date, short: true))
@@ -425,22 +427,42 @@ private struct FindingRow: View {
 
 private struct FindingDetail: View {
     @Bindable var model: WorkspaceModel
+    /// The diff's share of the height under the header; the user drags the line between them.
+    @AppStorage("diffFraction") private var diffFraction = 0.65
 
     var body: some View {
         if let finding = model.selectedFinding {
             VStack(spacing: 0) {
                 FindingHeader(model: model, finding: finding)
                 Divider()
-                content
+                withDiff
             }
         } else if model.showsGraph, let repository = model.selectedRepository {
             VStack(spacing: 0) {
                 GraphHeader(repository: repository)
                 Divider()
-                content
+                withDiff
             }
         } else {
             ContentUnavailableView("Выберите репозиторий", systemImage: "sidebar.left")
+        }
+    }
+
+    /// The graph or file list on top, and under it, once a file is clicked, most of the height for its diff.
+    @ViewBuilder
+    private var withDiff: some View {
+        if let file = model.diffFile {
+            GeometryReader { geometry in
+                VStack(spacing: 0) {
+                    content
+                        .frame(height: geometry.size.height * (1 - diffFraction))
+                    PaneDivider(fraction: $diffFraction, height: geometry.size.height)
+                    DiffPane(file: file, diff: model.fileDiff, error: model.fileDiffError, close: model.closeDiff)
+                }
+            }
+            .coordinateSpace(name: PaneDivider.space)
+        } else {
+            content
         }
     }
 
@@ -456,10 +478,12 @@ private struct FindingDetail: View {
                     selection: $model.selectedCommitHash,
                     files: model.commitFiles,
                     filesError: model.commitFilesError,
+                    openFile: model.diffFile,
+                    onOpenFile: model.toggleDiff,
                     onReachEnd: model.loadMoreHistory
                 )
             case .files(let files):
-                FileList(files: files)
+                FileList(files: files, openFile: model.diffFile, onOpenFile: model.toggleDiff)
             case nil:
                 ProgressView()
                     .controlSize(.small)
@@ -591,13 +615,22 @@ private struct FindingHeader: View {
 
 private struct FileList: View {
     let files: [CommitFileSnapshot]
+    let openFile: CommitFileSnapshot?
+    let onOpenFile: (CommitFileSnapshot) -> Void
 
     var body: some View {
         if files.isEmpty {
             ContentUnavailableView("Файлов нет", systemImage: "doc")
         } else {
-            List(files, id: \.path) { file in
-                FileRow(file: file)
+            // Selecting a file opens its diff below; selecting it again closes it.
+            List(selection: Binding {
+                openFile?.path
+            } set: { path in
+                if let file = files.first(where: { $0.path == path }) ?? openFile { onOpenFile(file) }
+            }) {
+                ForEach(files, id: \.path) { file in
+                    FileRow(file: file)
+                }
             }
         }
     }
