@@ -8,11 +8,24 @@ struct GitResult {
 }
 
 struct GitRunner {
-    func run(in repositoryURL: URL, _ arguments: [String]) throws -> GitResult {
+    /// `config` goes through GIT_CONFIG_KEY_n and GIT_CONFIG_VALUE_n, which take any key as is,
+    /// where `-c key=value` would split a key that contains "=".
+    func run(in repositoryURL: URL, _ arguments: [String], config: [(key: String, value: String)] = []) throws -> GitResult {
         let executable = "/usr/bin/git"
-        let command = [executable, "--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-C", repositoryURL.path] + arguments
+        // A signed commit would make git log run gpg.program, which the repository's config may point anywhere.
+        let command = [
+            executable, "--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null",
+            "-c", "log.showSignature=false", "-C", repositoryURL.path
+        ] + arguments
         var environment = ProcessInfo.processInfo.environment.filter { !$0.key.hasPrefix("GIT_") }
         environment.merge(["GIT_OPTIONAL_LOCKS": "0", "LC_ALL": "C", "LANG": "C"]) { _, new in new }
+        if !config.isEmpty {
+            environment["GIT_CONFIG_COUNT"] = String(config.count)
+            for (index, entry) in config.enumerated() {
+                environment["GIT_CONFIG_KEY_\(index)"] = entry.key
+                environment["GIT_CONFIG_VALUE_\(index)"] = entry.value
+            }
+        }
 
         func launchError(_ code: Int32) -> NSError {
             let underlying = NSError(domain: NSPOSIXErrorDomain, code: Int(code))
@@ -183,8 +196,8 @@ struct GitRunner {
         waitForExit(pid, &status)
     }
 
-    func output(in repositoryURL: URL, _ arguments: [String]) throws -> String {
-        try output(from: run(in: repositoryURL, arguments), in: repositoryURL, arguments)
+    func output(in repositoryURL: URL, _ arguments: [String], config: [(key: String, value: String)] = []) throws -> String {
+        try output(from: run(in: repositoryURL, arguments, config: config), in: repositoryURL, arguments)
     }
 
     func output(from result: GitResult, in repositoryURL: URL, _ arguments: [String]) throws -> String {

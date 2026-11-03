@@ -56,8 +56,9 @@ public struct RepositoryInspector {
 
     /// A diff longer than this is cut; nobody reads past it in a side pane.
     public static let diffLineLimit = 5000
-    /// Diffs show the file as stored: no external diff tools or text converters from the repository's config.
-    private static let diffOptions = ["--no-color", "--no-ext-diff", "--no-textconv"]
+    /// Diffs show the file as stored: no external diff tools or text converters from the repository's config,
+    /// and no look inside a submodule's worktree, where its own config would apply.
+    private static let diffOptions = ["--no-color", "--no-ext-diff", "--no-textconv", "--ignore-submodules=dirty"]
 
     /// How one file changed in a commit, against its first parent, as its file list counts it.
     public func diff(of path: String, in commit: CommitSnapshot, repositoryURL: URL) throws -> FileDiff {
@@ -70,12 +71,12 @@ public struct RepositoryInspector {
         let hasHead = try git.optionalOutput(in: worktreeURL, ["rev-parse", "--verify", "--quiet", "HEAD"]) != nil
         guard file.status != "?", hasHead else {
             let arguments = ["diff"] + Self.diffOptions + ["--no-index", "--", "/dev/null", file.path]
-            let result = try git.run(in: worktreeURL, arguments)
+            let result = try git.run(in: worktreeURL, arguments, config: filtersOff(in: worktreeURL))
             // --no-index exits with 1 when the files differ, which they always do here.
             if result.status == 1 { return Self.fileDiff(String(decoding: result.standardOutput, as: UTF8.self)) }
             return Self.fileDiff(try git.output(from: result, in: worktreeURL, arguments))
         }
-        return Self.fileDiff(try git.output(in: worktreeURL, ["diff"] + Self.diffOptions + ["HEAD", "--", file.path]))
+        return Self.fileDiff(try git.output(in: worktreeURL, ["diff"] + Self.diffOptions + ["HEAD", "--", file.path], config: filtersOff(in: worktreeURL)))
     }
 
     /// How one file in a stash differs from the commit it was stashed on.
@@ -144,11 +145,26 @@ public struct RepositoryInspector {
         ])
     }
 
+    /// Config that turns off every filter the repository defines. git runs a filter's clean command
+    /// when it compares a changed file with the index, so status and diff would otherwise run it.
+    private func filtersOff(in worktreeURL: URL) throws -> [(key: String, value: String)] {
+        let keys = try git.optionalOutput(in: worktreeURL, [
+            "config", "--name-only", "--get-regexp", #"^filter\..+\.(clean|smudge|process|required)$"#
+        ]) ?? ""
+        // "filter.<driver>.clean", where the driver's name may itself contain dots.
+        let drivers = Set(keys.split(separator: "\n").map { $0.split(separator: ".", omittingEmptySubsequences: false).dropFirst().dropLast().joined(separator: ".") })
+        return drivers.sorted().flatMap { driver in
+            ["clean", "smudge", "process"].map { (key: "filter.\(driver).\($0)", value: "") }
+                + [(key: "filter.\(driver).required", value: "false")]
+        }
+    }
+
     /// Uncommitted files of one worktree; untracked files have status "?".
     public func uncommittedFiles(in worktreeURL: URL) throws -> [CommitFileSnapshot] {
+        // A submodule's own worktree is not looked into: its config and filters are its own.
         let result = try git.run(in: worktreeURL, [
-            "status", "--porcelain=v1", "--untracked-files=all", "-z"
-        ])
+            "status", "--porcelain=v1", "--untracked-files=all", "--ignore-submodules=dirty", "-z"
+        ], config: filtersOff(in: worktreeURL))
         guard result.status == 0 else {
             throw NSError(
                 domain: "GitSight.RepositoryInspector",
