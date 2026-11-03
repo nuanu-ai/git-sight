@@ -9,7 +9,8 @@ enum RepositoryScoringIntegrationTests {
         try expectEqual(Severity(of: .uncommitted, lastChanged: daysAgo(4), now: now), .warning, "uncommitted work left for four days is abandoned")
         try expectEqual(Severity(of: .stash, lastChanged: daysAgo(2), now: now), .warning, "a stash is abandoned after a day")
         try expectEqual(Severity(of: .commits(upstreamGone: false), lastChanged: daysAgo(40), now: now), .critical, "unpushed commits left for over a month are forgotten")
-        try expectEqual(Severity(of: .commits(upstreamGone: true), lastChanged: daysAgo(40), now: now), .attention, "a branch deleted on the server stays a notice however old")
+        try expectEqual(Severity(of: .commits(upstreamGone: true), lastChanged: daysAgo(10), now: now), .attention, "a branch deleted on the server ten days ago is still a notice")
+        try expectEqual(Severity(of: .commits(upstreamGone: true), lastChanged: daysAgo(40), now: now), .warning, "a deleted branch left for over two weeks is no longer in progress, but never forgotten work")
     }
 
     static func testPushedAndMergedBranchesAreNotRisk() throws {
@@ -83,7 +84,7 @@ enum RepositoryScoringIntegrationTests {
 
         let snapshot = try RepositoryInspector().inspect(repositoryAt: fixture.repository)
         try expectEqual(snapshot.branches.first { $0.name == "feature" }?.unpushedCommits, 1, "the branch commit is on no remote ref")
-        try expectEqual(snapshot.severity, .attention, "a branch deleted on the server is most likely merged, so it is a notice rather than abandoned work")
+        try expectEqual(snapshot.severity, .warning, "a branch deleted on the server is most likely merged: left for over a month it is leftover to clean up, not critical")
     }
 
     static func testWorktreesMatterOnlyForWorkTheyHold() throws {
