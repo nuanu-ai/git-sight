@@ -41,19 +41,19 @@ extension View {
     }
 }
 
-/// View ▸ Крупнее / Мельче / Обычный размер.
+/// View ▸ Bigger / Smaller / Actual Size.
 struct TextSizeCommands: Commands {
     @AppStorage(TextRole.sizeKey) private var base = TextRole.standardSize
 
     var body: some Commands {
         CommandGroup(before: .toolbar) {
-            Button("Крупнее") { base = min(base + 1, TextRole.sizes.upperBound) }
+            Button("Bigger") { base = min(base + 1, TextRole.sizes.upperBound) }
                 .keyboardShortcut("+")
                 .disabled(base >= TextRole.sizes.upperBound)
-            Button("Мельче") { base = max(base - 1, TextRole.sizes.lowerBound) }
+            Button("Smaller") { base = max(base - 1, TextRole.sizes.lowerBound) }
                 .keyboardShortcut("-")
                 .disabled(base <= TextRole.sizes.lowerBound)
-            Button("Обычный размер") { base = TextRole.standardSize }
+            Button("Actual Size") { base = TextRole.standardSize }
                 .keyboardShortcut("0")
                 .disabled(base == TextRole.standardSize)
             Divider()

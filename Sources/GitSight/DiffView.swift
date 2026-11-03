@@ -40,11 +40,11 @@ struct DiffPane: View {
             }
             Spacer(minLength: 8)
             Button(action: close) {
-                Image(systemName: "xmark").accessibilityLabel("Закрыть дифф")
+                Image(systemName: "xmark").accessibilityLabel("Close diff")
             }
             .buttonStyle(.borderless)
             .keyboardShortcut(.cancelAction)
-            .help("Закрыть (Esc)")
+            .help("Close (Esc)")
         }
         .textRole(.secondary)
         .monospacedDigit()
@@ -56,12 +56,12 @@ struct DiffPane: View {
     @ViewBuilder
     private var content: some View {
         if let error {
-            ContentUnavailableView("Не удалось прочитать дифф", systemImage: "exclamationmark.triangle", description: Text(error))
+            ContentUnavailableView("Couldn't read the diff", systemImage: "exclamationmark.triangle", description: Text(error))
         } else if let diff {
             if diff.isBinary {
-                ContentUnavailableView("Двоичный файл", systemImage: "doc", description: Text("Построчного диффа у него нет."))
+                ContentUnavailableView("Binary file", systemImage: "doc", description: Text("There are no lines to compare."))
             } else if diff.lines.isEmpty {
-                ContentUnavailableView("Изменений в тексте нет", systemImage: "doc", description: Text("Изменились только права или режим файла."))
+                ContentUnavailableView("The text is the same", systemImage: "doc", description: Text("Only the file's permissions or mode changed."))
             } else {
                 DiffLines(diff: diff)
             }
@@ -89,7 +89,7 @@ private struct DiffLines: View {
                             .background(background(line.kind))
                     }
                     if diff.isTruncated {
-                        Text("Показаны первые \(RepositoryInspector.diffLineLimit) строк")
+                        Text("Showing the first \(RepositoryInspector.diffLineLimit) lines")
                             .foregroundStyle(.secondary)
                             .padding(12)
                     }

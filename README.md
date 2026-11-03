@@ -24,14 +24,18 @@ git-sight asks for you. Point it at the folder with your repositories and it sho
 | **Unmerged branches** | pushed, but never made it into the default branch; squash merges count as merged |
 | **Leftovers** | merged branches and the agent worktrees still holding them |
 
-Work that exists only on this machine gets a verdict by age: **В работе** for the first three days, **Заброшено** after that (a stash after one day), **Забыто** after a month. A pushed branch that never got merged ages slower: two weeks in progress, abandoned after that, forgotten after two months. Leftovers lose nothing, so they are only ever clutter. A repository is as bad as its worst piece, and its row says how much is lying around: «сейчас на main · 21 ветка, 13 не влиты · 4 ворктри».
+Work that exists only on this machine gets a verdict by age: **In progress** for the first three days, **Abandoned** after that (a stash after one day), **Forgotten** after a month. A pushed branch that never got merged ages slower: two weeks in progress, abandoned after that, forgotten after two months. Leftovers lose nothing, so they are only ever **Clutter**.
 
-## A Source Control panel for every repository
+Repositories are sorted by weight: size × age × risk. Size is files for uncommitted work and commits for the rest. Age grows on a log scale: a week counts almost three times as much as today, three months about six times. Work on the server counts for less than work only on this Mac, and leftovers for less still.
 
-- **Live.** An FSEvents watcher rereads only the repository that changed. Edits, commits and stashes show up within a second, and repositories touched in the last 15 minutes rise to the top under «Сейчас».
-- **The graph.** All branches, remote branches, tags and agent worktrees, drawn the way VS Code draws it. Commits the server lacks sit on an orange band. Scroll and it keeps reading history.
-- **Files and diffs.** Click a commit and its files open under it. Click a file and its diff opens below the graph.
-- **A task for your agent.** For anything found, one button copies a self-contained request: what was found, where, what to do. It always ends with "do not delete anything without asking me".
+## One screen for all of it
+
+- **Overview.** A row per repository and a bubble per kind of work, sized by how much there is and colored by its verdict. Click a bubble to open that work.
+- **Worktrees and branches.** Each repository lists its worktrees, then branches not checked out anywhere, then stashes whose branch is gone. Every chip jumps to its spot in the graph.
+- **The graph.** All branches, remote branches, tags and worktrees, drawn the way VS Code draws it. Uncommitted files and stashes get rows of their own above the commit they sit on. Commits the server lacks sit on an orange band.
+- **Live.** An FSEvents watcher rereads only the repository that changed. Edits, commits and stashes show up within a second, and repositories touched in the last 15 minutes move up under "Live now".
+- **Files and diffs.** Click a row in the graph and its files open under it. Click a file and its diff opens below.
+- **A task for your agent.** One button copies a self-contained request: what was found, where, and what to do. It always asks the agent to wait for your go-ahead before deleting anything.
 - **Readable.** ⌘+ and ⌘− scale all text, the graph included.
 
 ## Read-only, and it means it
@@ -56,8 +60,6 @@ sh Scripts/render_window.sh window.png .build/DemoWorkspace search-api unmerged 
 ```
 
 `swift test` needs Xcode, so the tests are a plain executable. Every test lands red first, then green with the mutants it killed named in the commit. See [CONTRIBUTING.md](CONTRIBUTING.md).
-
-The interface is in Russian.
 
 ## License
 

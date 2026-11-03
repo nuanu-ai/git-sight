@@ -3,373 +3,338 @@ import GitSightCore
 import SwiftUI
 
 enum RepositoryText {
-    private static let locale = Locale(identifier: "ru_RU")
-
     static let fullDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.locale = locale
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
         return formatter
     }()
 
-    /// How long ago, without "назад": "8 месяцев", or "8 мес" when `short`.
-    /// Both round down from the same calendar components, so a row and its header always agree.
-    static func age(_ date: Date?, short: Bool = false) -> String {
-        guard let date else { return "—" }
-        let parts = Calendar(identifier: .gregorian).dateComponents([.year, .month, .day, .hour, .minute], from: date, to: Date())
+    /// How long ago, without "ago": "now", "5 min", "3 hours", "2 days", "3 weeks", "2 months", "1 year".
+    /// Rounds down from calendar components, so a row and its header always agree.
+    static func age(_ date: Date?, now: Date = Date()) -> String {
+        guard let date else { return "" }
+        let parts = Calendar(identifier: .gregorian).dateComponents([.year, .month, .day, .hour, .minute], from: date, to: now)
         let years = parts.year ?? 0, months = parts.month ?? 0, days = parts.day ?? 0
         let hours = parts.hour ?? 0, minutes = parts.minute ?? 0
-        // Accusative forms: "неделю назад", "минуту без движения".
-        if years > 0 { return short ? "\(years) г" : counted(years, one: "год", few: "года", many: "лет") }
-        if months > 0 { return short ? "\(months) мес" : counted(months, one: "месяц", few: "месяца", many: "месяцев") }
-        if days >= 7 { return short ? "\(days / 7) нед" : counted(days / 7, one: "неделю", few: "недели", many: "недель") }
-        if days > 0 { return short ? "\(days) дн" : counted(days, one: "день", few: "дня", many: "дней") }
-        if hours > 0 { return short ? "\(hours) ч" : counted(hours, one: "час", few: "часа", many: "часов") }
-        if minutes > 0 { return short ? "\(minutes) мин" : counted(minutes, one: "минуту", few: "минуты", many: "минут") }
-        return "сейчас"
+        if years > 0 { return counted(years, "year", "years") }
+        if months > 0 { return counted(months, "month", "months") }
+        if days >= 7 { return counted(days / 7, "week", "weeks") }
+        if days > 0 { return counted(days, "day", "days") }
+        if hours > 0 { return counted(hours, "hour", "hours") }
+        if minutes > 0 { return "\(minutes) min" }
+        return "now"
     }
 
-    /// "8 месяцев назад", or "только что" within the first minute.
-    static func ago(_ date: Date?) -> String {
-        guard let date else { return "—" }
-        return Date().timeIntervalSince(date) < 60 ? "только что" : "\(age(date)) назад"
+    /// "3 days ago", or "just now" within the first minute.
+    static func ago(_ date: Date?, now: Date = Date()) -> String {
+        guard let date else { return "" }
+        return now.timeIntervalSince(date) < 60 ? "just now" : "\(age(date, now: now)) ago"
     }
 
     static func fullDate(_ date: Date) -> String {
         fullDateFormatter.string(from: date)
     }
 
-    static func files(_ count: Int) -> String {
-        counted(count, one: "файл", few: "файла", many: "файлов")
+    static func counted(_ value: Int, _ one: String, _ many: String) -> String {
+        "\(value.formatted()) \(value == 1 ? one : many)"
     }
 
-    static func commits(_ count: Int) -> String {
-        counted(count, one: "коммит", few: "коммита", many: "коммитов")
+    static func files(_ count: Int) -> String { counted(count, "file", "files") }
+    static func commits(_ count: Int) -> String { counted(count, "commit", "commits") }
+
+    static func weight(_ value: Double) -> String {
+        Int(value.rounded()).formatted()
     }
 
     static func path(_ url: URL) -> String {
         NSString(string: url.path).abbreviatingWithTildeInPath
     }
+}
 
-    static func counted(_ value: Int, one: String, few: String, many: String) -> String {
-        let remainder100 = value % 100
-        let remainder10 = value % 10
-        let word: String
-        if (11...14).contains(remainder100) {
-            word = many
-        } else if remainder10 == 1 {
-            word = one
-        } else if (2...4).contains(remainder10) {
-            word = few
-        } else {
-            word = many
+extension Verdict {
+    var title: String {
+        switch self {
+        case .inProgress: return "In progress"
+        case .abandoned: return "Abandoned"
+        case .forgotten: return "Forgotten"
+        case .clutter: return "Clutter"
         }
-        return "\(value) \(word)"
     }
-}
 
-extension Color {
-    /// Text on a filled badge: dark on the light yellow and green, where white does not read.
-    var badgeText: Color {
-        self == .yellow || self == .green ? Color.black.opacity(0.8) : .white
-    }
-}
-
-extension Severity {
+    /// Color only where something is wrong: work in progress stays gray, clutter is an outline.
     var color: Color {
         switch self {
-        case .clean: return .green
-        case .attention: return .yellow
-        case .warning: return .orange
-        case .critical: return .red
+        case .inProgress, .clutter: return .secondary
+        case .abandoned: return .orange
+        case .forgotten: return .red
         }
     }
+}
 
-    /// Color only where something is wrong; work in progress stays neutral.
-    var tint: Color {
-        self >= .warning ? color : .secondary
+/// A verdict as a dot: filled for work at risk, an outline for clutter or nothing at all.
+struct VerdictDot: View {
+    @Environment(\.backgroundProminence) private var prominence
+    let verdict: Verdict?
+    var size: CGFloat = 8
+
+    var body: some View {
+        // On a selected row the dot turns white, as macOS colors marks in Mail and Finder.
+        let selected = prominence == .increased
+        Group {
+            if let verdict, verdict != .clutter {
+                Circle().fill(selected ? Color.white : verdict == .inProgress ? Color.gray.opacity(0.7) : verdict.color)
+            } else {
+                Circle().strokeBorder(selected ? Color.white : Color.gray.opacity(0.55), lineWidth: 1.5)
+            }
+        }
+        .frame(width: size, height: size)
+        .help(verdict?.title ?? "Clean")
+        .accessibilityLabel(verdict?.title ?? "Clean")
     }
+}
+
+/// A small accent dot after a name that changed within the last few minutes.
+struct LiveDot: View {
+    let date: Date
+
+    var body: some View {
+        Circle()
+            .selectableTint(.accentColor)
+            .frame(width: 6, height: 6)
+            .help("Changed \(RepositoryText.ago(date))")
+            .accessibilityLabel("Changed \(RepositoryText.ago(date))")
+    }
+}
+
+/// A color that turns white on a selected row: orange or blue on the selection's blue is hard to read.
+private struct SelectableTint: ViewModifier {
+    @Environment(\.backgroundProminence) private var prominence
+    let color: Color
+
+    func body(content: Content) -> some View {
+        content.foregroundStyle(prominence == .increased ? Color.white : color)
+    }
+}
+
+extension View {
+    func selectableTint(_ color: Color) -> some View {
+        modifier(SelectableTint(color: color))
+    }
+}
+
+/// The overview's columns: one per kind of work, as the window counts it.
+enum WorkColumn: String, CaseIterable, Identifiable {
+    case uncommitted, unpushed, stashes, unmerged, leftovers
+
+    var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .clean: return "Чисто"
-        case .attention: return "В работе"
-        case .warning: return "Заброшено"
-        case .critical: return "Забыто"
-        }
-    }
-}
-
-/// One piece of work that exists only on this machine.
-struct Finding: Identifiable {
-    enum Kind: Hashable {
-        case uncommitted
-        case branch
-        case detached
-        case stash
-        /// A branch the server has and the base never got.
-        case unmerged
-        /// Merged branches left lying around, with the worktrees that hold them.
-        case leftover
-    }
-
-    /// Where the detail column reads this finding from.
-    enum Source: Hashable {
-        /// The whole history behind the tips, with what the server lacks marked.
-        case history(directory: URL, tips: [String])
-        case uncommitted(worktree: URL)
-        /// `hash` addresses the stash; `name` (stash@{n}) shifts when another stash is pushed.
-        case stash(directory: URL, name: String, hash: String)
-    }
-
-    let id: String
-    let kind: Kind
-    let title: String
-    let detail: String
-    let note: String?
-    let date: Date?
-    let location: URL
-    let source: Source
-    let work: UnsavedWork
-    let severity: Severity
-    /// Why it has that severity, in a few words.
-    let reason: String
-
-    /// Leftovers lose nothing, so they get a gray label of their own instead of a verdict.
-    var badge: (title: String, color: Color) {
-        kind == .leftover ? ("Мусор", .gray) : (severity.title, severity.color)
-    }
-
-    var tint: Color { kind == .leftover ? .secondary : severity.tint }
-
-    init(
-        id: String, kind: Kind, title: String, detail: String, note: String?, date: Date?,
-        location: URL, source: Source, verdict: (work: UnsavedWork, lastChanged: Date?)
-    ) {
-        self.id = id
-        self.kind = kind
-        self.title = title
-        self.detail = detail
-        self.note = note
-        self.date = date
-        self.location = location
-        self.source = source
-        work = verdict.work
-        let lastChanged = verdict.lastChanged ?? Date()
-        severity = Severity(of: verdict.work, lastChanged: lastChanged)
-        if verdict.work == .leftover {
-            reason = "можно убрать"
-        } else if severity >= .warning {
-            reason = "\(RepositoryText.age(lastChanged)) без движения"
-        } else if verdict.work == .commits(upstreamGone: true) {
-            reason = "вероятно, уже влита"
-        } else {
-            reason = "изменено \(RepositoryText.ago(lastChanged))"
+        case .uncommitted: return "Uncommitted"
+        case .unpushed: return "Unpushed"
+        case .stashes: return "Stashes"
+        case .unmerged: return "Unmerged"
+        case .leftovers: return "Leftovers"
         }
     }
 
     var systemImage: String {
-        switch kind {
-        case .uncommitted: return "pencil.line"
-        case .branch: return "arrow.triangle.branch"
-        case .detached: return "point.topleft.down.to.point.bottomright.curvepath"
-        case .stash: return "tray"
+        switch self {
+        case .uncommitted: return "pencil"
+        case .unpushed: return "arrow.up"
+        case .stashes: return "tray"
         case .unmerged: return "arrow.triangle.pull"
-        case .leftover: return "archivebox"
+        case .leftovers: return "checkmark"
+        }
+    }
+
+    var unit: (one: String, many: String) {
+        switch self {
+        case .uncommitted: return ("file", "files")
+        case .unpushed: return ("commit", "commits")
+        case .stashes: return ("stash", "stashes")
+        case .unmerged: return ("branch", "branches")
+        case .leftovers: return ("leftover", "leftovers")
+        }
+    }
+
+    func contains(_ kind: WorkPiece.Kind) -> Bool {
+        switch self {
+        case .uncommitted: return kind == .uncommitted
+        case .unpushed: return kind == .unpushed || kind == .detached
+        case .stashes: return kind == .stash
+        case .unmerged: return kind == .unmerged
+        case .leftovers: return kind == .leftover
+        }
+    }
+
+    /// Files for uncommitted work, commits for unpushed ones, one per branch or stash for the rest.
+    func count(_ piece: WorkPiece) -> Int {
+        self == .uncommitted || self == .unpushed ? piece.amount : 1
+    }
+
+    /// What a cell's tooltip says about its pieces.
+    func describe(_ value: Int, base: String) -> String {
+        switch self {
+        case .uncommitted: return "\(RepositoryText.files(value)) uncommitted"
+        case .unpushed: return "\(RepositoryText.commits(value)) only on this Mac"
+        case .stashes: return RepositoryText.counted(value, "stash", "stashes")
+        case .unmerged: return "\(RepositoryText.counted(value, "branch", "branches")) not merged into \(base)"
+        case .leftovers: return "\(RepositoryText.counted(value, "branch", "branches")) merged and safe to remove"
         }
     }
 }
 
+extension WorkPiece.Kind {
+    var systemImage: String {
+        switch self {
+        case .uncommitted: return "pencil"
+        case .unpushed, .detached: return "arrow.up"
+        case .stash: return "tray"
+        case .unmerged: return "arrow.triangle.pull"
+        case .leftover: return "checkmark"
+        }
+    }
+}
+
+extension WorkPiece {
+    /// The stash's own words, without git's "On main:" prefix.
+    var stashText: String { stash?.text ?? "" }
+}
+
+/// What the weight is made of, for the popover next to it.
+enum WeightScale {
+    static let ages: [(String, Double)] = [("today", 0), ("a week", 7), ("a month", 30), ("three months", 90)].map { ($0.0, factor(days: $0.1)) }
+    static let risks: [(String, Double)] = [("only on this Mac", 1), ("on the server, not merged", 0.3), ("merged leftovers", 0.2)]
+
+    static func factor(days: Double) -> Double { 1 + log2(1 + days / 3) }
+}
+
 extension RepositorySnapshot {
-    /// Oldest first: the longer work is left, the more likely it is forgotten.
-    var findings: [Finding] {
-        var findings: [Finding] = []
-        for worktree in worktrees where worktree.dirtyFileCount > 0 {
-            findings.append(Finding(
-                id: "uncommitted:\(worktree.path.path)",
-                kind: .uncommitted,
-                title: worktree.isMain ? (worktree.branch ?? "основной чекаут") : worktree.name,
-                detail: "не закоммичено: \(RepositoryText.files(worktree.dirtyFileCount))",
-                note: worktree.isMain ? nil : "ворктри · \(worktree.branch ?? "detached HEAD")",
-                date: worktree.dirtyModifiedAt ?? worktree.lastActivity,
-                location: worktree.path,
-                source: .uncommitted(worktree: worktree.path),
-                verdict: (.uncommitted, worktree.dirtyModifiedAt ?? worktree.lastActivity)
-            ))
-        }
-        if hasRemote {
-            for branch in branches where branch.unpushedCommits > 0 {
-                findings.append(Finding(
-                    // Branch and stash names repeat across repositories; worktree paths do not.
-                    id: "\(path.path)|branch:\(branch.name)",
-                    kind: .branch,
-                    title: branch.name,
-                    detail: "нет на сервере: \(RepositoryText.commits(branch.unpushedCommits))",
-                    note: branch.upstreamGone ? "удалена на сервере" : nil,
-                    date: branch.lastCommitDate,
-                    location: worktrees.first { $0.branch == branch.name }?.path ?? path,
-                    source: .history(directory: path, tips: ["refs/heads/\(branch.name)"]),
-                    verdict: (.commits(upstreamGone: branch.upstreamGone), branch.lastCommitDate)
-                ))
-            }
-        }
-        for branch in unfinishedBranches {
-            findings.append(Finding(
-                id: "\(path.path)|unmerged:\(branch.name)",
-                kind: .unmerged,
-                title: branch.name,
-                detail: "не влито в \(baseBranch ?? "main"): \(RepositoryText.commits(branch.unmergedCommits))",
-                note: branch.upstreamGone ? "удалена на сервере" : nil,
-                date: branch.lastCommitDate,
-                location: worktrees.first { $0.branch == branch.name }?.path ?? path,
-                source: .history(directory: path, tips: ["refs/heads/\(branch.name)"]),
-                verdict: (.unmerged, branch.lastCommitDate)
-            ))
-        }
-        let leftovers = leftoverBranches
-        if !leftovers.isEmpty {
-            let held = leftoverWorktrees.count
-            let oldest = leftovers.compactMap(\.lastCommitDate).min()
-            findings.append(Finding(
-                id: "\(path.path)|leftovers",
-                kind: .leftover,
-                title: "Хвосты",
-                detail: [RepositoryText.counted(leftovers.count, one: "ветка влита", few: "ветки влиты", many: "веток влито") + " в \(baseBranch ?? "main")",
-                         held > 0 ? "\(held) ворктри" : nil].compactMap { $0 }.joined(separator: " · "),
-                note: nil,
-                date: oldest,
-                location: path,
-                source: .history(directory: path, tips: leftovers.map { "refs/heads/\($0.name)" }),
-                verdict: (.leftover, oldest)
-            ))
-        }
-        for worktree in worktrees where worktree.unpushedCommits > 0 {
-            findings.append(Finding(
-                id: "detached:\(worktree.path.path)",
-                kind: .detached,
-                title: worktree.name,
-                detail: "только в этом ворктри: \(RepositoryText.commits(worktree.unpushedCommits))",
-                note: "detached HEAD",
-                date: worktree.lastActivity,
-                location: worktree.path,
-                source: .history(directory: worktree.path, tips: ["HEAD"]),
-                verdict: (.commits(upstreamGone: false), worktree.lastActivity)
-            ))
-        }
-        // Stashes are shared by all worktrees; a bare repository can only list them from one.
-        let stashDirectory = worktrees.first?.path ?? path
-        for stash in stashes {
-            // git writes "On <branch>: <message>" or "WIP on <branch>: <hash> <subject>".
-            var message = stash.message
-            var detail = stash.name
-            if let separator = message.range(of: ": "), message.hasPrefix("On ") || message.hasPrefix("WIP on ") {
-                let branch = message[..<separator.lowerBound].split(separator: " ").last.map(String.init) ?? ""
-                message = String(message[separator.upperBound...])
-                detail += " · \(branch)"
-            }
-            findings.append(Finding(
-                id: "\(path.path)|stash:\(stash.hash)",
-                kind: .stash,
-                title: message,
-                detail: detail,
-                note: nil,
-                date: stash.date,
-                location: path,
-                source: .stash(directory: stashDirectory, name: stash.name, hash: stash.hash),
-                verdict: (.stash, stash.date)
-            ))
-        }
-        return findings.sorted { ($0.date ?? .distantFuture) < ($1.date ?? .distantFuture) }
+    /// Changes newer than this count as live.
+    static let liveWindow: TimeInterval = 15 * 60
+
+    /// The newest change, if it happened within the live window.
+    func liveChange(now: Date = Date()) -> RecentChange? {
+        latestChange.flatMap { abs(now.timeIntervalSince($0.date)) < Self.liveWindow ? $0 : nil }
     }
 
-    /// Linked worktrees that hold nothing but a leftover branch.
-    var leftoverWorktrees: [WorktreeSnapshot] {
-        let names = Set(leftoverBranches.map(\.name))
-        return worktrees.filter { names.contains($0.branch ?? "") }
+    var base: String { baseBranch ?? "main" }
+
+    /// The pieces each column of the overview counts.
+    func column(_ column: WorkColumn, now: Date = Date()) -> (value: Int, lead: WorkPiece?) {
+        let pieces = places.flatMap(\.pieces).filter { column.contains($0.kind) }
+        // The worst verdict, and within it the oldest piece.
+        let lead = pieces.max { ($0.verdict(now: now), $1.date) < ($1.verdict(now: now), $0.date) }
+        return (pieces.reduce(0) { $0 + column.count($1) }, lead)
+    }
+}
+
+extension WorkPlace {
+    /// Stable across rescans: the worktree's folder, or the branch's name.
+    var id: String {
+        if let worktree { return "worktree:\(worktree.path.path)" }
+        if branch != nil { return "branch:\(branchName ?? "")" }
+        return "deleted:\(branchName ?? "")"
     }
 
-    /// "сейчас на main · 21 ветка, 13 не влиты · 4 ворктри", the same in the list and above the graph:
-    /// how much is lying around locally.
-    var branchesSummary: String {
-        var branchCount = RepositoryText.counted(branches.count, one: "ветка", few: "ветки", many: "веток")
-        let unfinished = unfinishedBranches.count
-        if unfinished > 0 { branchCount += ", " + RepositoryText.counted(unfinished, one: "не влита", few: "не влиты", many: "не влиты") }
-        let linked = worktrees.filter { !$0.isMain }.count
-        return [currentBranch.map { "сейчас на \($0)" }, branchCount, linked > 0 ? "\(linked) ворктри" : nil]
-            .compactMap { $0 }.joined(separator: " · ")
-    }
+    var isMainWorktree: Bool { worktree?.isMain ?? false }
 
-    /// What happened last, e.g. "main: 2 файла не закоммичено".
-    var latestChangeText: (date: Date, text: String)? {
-        latestChange.map { change in
-            let place = change.place.map { "\($0): " } ?? ""
-            switch change.kind {
-            case .uncommitted(let files): return (change.date, "\(place)\(RepositoryText.files(files)) не закоммичено")
-            case .commit: return (change.date, "\(place)новый коммит")
-            case .stash: return (change.date, "новый стэш")
-            }
-        }
-    }
+    /// A stash whose branch is gone, the only kind of place with neither worktree nor branch.
+    var isDeletedBranch: Bool { worktree == nil && branch == nil }
 
-    /// One line for the sidebar: what is at stake.
-    var summary: String {
-        var parts: [String] = []
-        let files = worktrees.reduce(0) { $0 + $1.dirtyFileCount }
-        if files > 0 { parts.append("\(RepositoryText.files(files)) не закоммичено") }
-        let unpushedBranches = hasRemote ? branches.filter { $0.unpushedCommits > 0 }.count : 0
-        if unpushedBranches > 0 {
-            parts.append("\(RepositoryText.counted(unpushedBranches, one: "ветка", few: "ветки", many: "веток")) не на сервере")
-        }
-        let detached = worktrees.filter { $0.unpushedCommits > 0 }.count
-        if detached > 0 { parts.append("\(detached) ворктри с коммитами вне веток") }
-        if !stashes.isEmpty { parts.append(RepositoryText.counted(stashes.count, one: "стэш", few: "стэша", many: "стэшей")) }
-        let unfinished = unfinishedBranches.count
-        if unfinished > 0 { parts.append(RepositoryText.counted(unfinished, one: "не влита", few: "не влиты", many: "не влиты")) }
-        let leftovers = leftoverBranches.count
-        if leftovers > 0 { parts.append("хвосты: \(leftovers)") }
-        if !hasRemote { parts.append("нет remote") }
-        return parts.isEmpty ? "всё на сервере" : parts.joined(separator: " · ")
-    }
+    /// How a list row names the branch, or what HEAD is on.
+    var branchLabel: String { branchName ?? (isDeletedBranch ? "no branch" : "detached HEAD") }
+}
 
-    /// A self-contained request a coding agent can act on without opening git-sight.
-    func agentTask(for finding: Finding, files: [CommitFileSnapshot]? = nil) -> String {
-        let ago = RepositoryText.ago(finding.date)
-        let place = RepositoryText.path(finding.location)
-        var lines: [String] = []
-        switch finding.kind {
+// MARK: - Sentences about work
+
+enum WorkText {
+    /// One line per piece above the graph.
+    static func fact(_ piece: WorkPiece, in place: WorkPlace, repository: RepositorySnapshot, now: Date = Date()) -> String {
+        switch piece.kind {
         case .uncommitted:
-            lines.append("В \(place) лежат незакоммиченные изменения: \(RepositoryText.files(worktrees.first { $0.path == finding.location }?.dirtyFileCount ?? 0)), последнее изменение \(ago).")
-            if let files, !files.isEmpty {
-                lines.append("Файлы: " + files.prefix(30).map(\.path).joined(separator: ", ") + (files.count > 30 ? " и ещё \(files.count - 30)." : "."))
-            }
-            lines.append("Разберись, что это. Нужное закоммить в отдельную ветку и запушь. То, что не должно попадать в git, предложи добавить в .gitignore.")
-        case .branch:
-            lines.append("В репозитории \(RepositoryText.path(path)) ветка `\(finding.title)`: \(finding.detail), последний коммит \(ago).")
-            if finding.note != nil {
-                lines.append("Ветку уже удалили на сервере. Проверь, влита ли эта работа в основную ветку (например, через squash).")
-            }
-            lines.append("Если работа нужна, запушь ветку и открой PR. Если она уже влита или не нужна, скажи мне, и ветку можно будет удалить.")
+            let live = now.timeIntervalSince(piece.date) < 5 * 60
+            return "\(RepositoryText.files(piece.amount)) uncommitted, " + (live ? "changing right now" : "last edit \(RepositoryText.ago(piece.date, now: now))")
+        case .unpushed:
+            let commits = "\(RepositoryText.commits(piece.amount)) only on this Mac"
+            return piece.upstreamGone ? "\(commits). The branch is gone from the server, so it may be merged already" : commits
         case .detached:
-            lines.append("В ворктри \(place) на detached HEAD есть коммиты, которых нет ни в одной ветке и ни на сервере (\(RepositoryText.commits(worktrees.first { $0.path == finding.location }?.unpushedCommits ?? 0))), последний \(ago).")
-            lines.append("Создай для них ветку и запушь, либо объясни, почему их можно выбросить.")
+            return "\(RepositoryText.commits(piece.amount)) on no branch. Removing the worktree would lose them"
         case .unmerged:
-            lines.append("В репозитории \(RepositoryText.path(path)) ветка `\(finding.title)` есть на сервере, но не влита в \(baseBranch ?? "main"): \(RepositoryText.commits(branches.first { $0.name == finding.title }?.unmergedCommits ?? 0)), последний коммит \(ago).")
-            lines.append("Выясни, что с этой работой. Если она нужна, доведи её до PR и влей. Если устарела или уже не нужна, скажи мне, и ветку можно будет удалить локально и на сервере.")
-        case .leftover:
-            let names = leftoverBranches.map { "`\($0.name)`" }.joined(separator: ", ")
-            lines.append("В репозитории \(RepositoryText.path(path)) лежат ветки, уже влитые в \(baseBranch ?? "main"): \(names). Последний коммит в самой старой \(ago).")
-            let held = leftoverWorktrees.map { RepositoryText.path($0.path) }
-            if !held.isEmpty {
-                lines.append("Они открыты в ворктри: \(held.joined(separator: ", ")).")
-            }
-            lines.append("Проверь, что каждая действительно влита, и предложи список на удаление: `git worktree remove <путь>` для ворктри, `git branch -d <ветка>` для веток. Не используй `-D` и `--force`: если git отказывается удалять, покажи мне почему.")
+            return "\(RepositoryText.commits(piece.amount)) on the server that \(repository.base) doesn't have"
         case .stash:
-            guard case .stash(_, let name, let hash) = finding.source else { break }
-            lines.append("В репозитории \(RepositoryText.path(path)) есть стэш \(name) «\(finding.title)», создан \(ago). Его коммит: \(hash).")
-            lines.append("Посмотри содержимое: `git stash show -p --include-untracked \(hash)`. Если работа нужна, перенеси её в отдельную ветку и запушь.")
+            return "Stash \"\(piece.stashText)\", \(RepositoryText.ago(piece.date, now: now))"
+        case .leftover:
+            let rest = place.worktree == nil ? "The branch can be deleted" : "Nothing else is in the worktree, so it and the branch can go"
+            return "Merged into \(repository.base) \(RepositoryText.ago(piece.date, now: now)). \(rest)"
         }
-        lines.append("Ничего не удаляй без моего подтверждения.")
+    }
+
+    static func clean(_ place: WorkPlace) -> String {
+        place.worktree == nil ? "Nothing here is at risk." : "Everything here is committed and pushed."
+    }
+
+    /// A short phrase per piece, for the clean-up task.
+    private static func brief(_ piece: WorkPiece, repository: RepositorySnapshot) -> String {
+        switch piece.kind {
+        case .uncommitted: return "\(RepositoryText.files(piece.amount)) uncommitted"
+        case .unpushed: return "\(RepositoryText.commits(piece.amount)) not on the server"
+        case .detached: return "\(RepositoryText.commits(piece.amount)) on no branch"
+        case .unmerged: return "\(RepositoryText.commits(piece.amount)) not merged into \(repository.base)"
+        case .stash: return "stash \"\(piece.stashText)\""
+        case .leftover: return "merged into \(repository.base)"
+        }
+    }
+
+    private static func name(_ place: WorkPlace) -> String {
+        if let worktree = place.worktree {
+            return "worktree \(RepositoryText.path(worktree.path)) (\(place.branchLabel))"
+        }
+        return place.isDeletedBranch ? "deleted branch \(place.branchLabel)" : "branch \(place.branchLabel)"
+    }
+
+    /// A request an agent can act on without opening git-sight. `files` are the uncommitted files, when loaded.
+    static func task(for place: WorkPlace, in repository: RepositorySnapshot, files: [CommitFileSnapshot]? = nil, now: Date = Date()) -> String {
+        var lines = ["In \(RepositoryText.path(repository.path)), the \(name(place)) has work that may be abandoned:"]
+        for piece in place.pieces {
+            switch piece.kind {
+            case .uncommitted:
+                lines.append("- \(RepositoryText.files(piece.amount)) uncommitted, last edited \(RepositoryText.ago(piece.date, now: now)).")
+                if let files, !files.isEmpty {
+                    lines.append("  Files: " + files.prefix(30).map(\.path).joined(separator: ", ") + (files.count > 30 ? ", and \(files.count - 30) more." : "."))
+                }
+            case .unpushed:
+                lines.append("- \(RepositoryText.commits(piece.amount)) that aren't on the server, the latest from \(RepositoryText.ago(piece.date, now: now)).")
+                if piece.upstreamGone {
+                    lines.append("  The branch was deleted on the server. Check whether this work was merged already, for example as a squash.")
+                }
+            case .detached:
+                lines.append("- \(RepositoryText.commits(piece.amount)) on a detached HEAD that no branch holds, the latest from \(RepositoryText.ago(piece.date, now: now)).")
+            case .unmerged:
+                lines.append("- \(RepositoryText.commits(piece.amount)) on the server that \(repository.base) doesn't have, the latest from \(RepositoryText.ago(piece.date, now: now)).")
+            case .stash:
+                if let stash = piece.stash {
+                    lines.append("- The stash \"\(stash.text)\" from \(RepositoryText.ago(piece.date, now: now)). Its commit is \(stash.hash); `git stash show -p --include-untracked \(stash.hash)` shows it.")
+                }
+            case .leftover:
+                lines.append("- The branch is already merged into \(repository.base)" + (place.worktree == nil ? "." : ", and the worktree holds nothing else."))
+            }
+        }
+        lines.append("Find out what this is and what is worth keeping. Commit and push what's needed. For what can go, list the commands (`git worktree remove`, `git branch -d`, `git stash drop`) and wait for me to confirm before running them. Don't use -D or --force.")
+        return lines.joined(separator: "\n")
+    }
+
+    /// Everything in one repository, heaviest first.
+    static func task(for repository: RepositorySnapshot, now: Date = Date()) -> String {
+        let places = repository.places.filter { !$0.pieces.isEmpty }.sorted { $0.weight(now: now) > $1.weight(now: now) }
+        var lines = ["Abandoned work in \(RepositoryText.path(repository.path)):"]
+        for place in places {
+            let idle = place.lead(now: now).map { "; idle for \(RepositoryText.age($0.date, now: now))" } ?? ""
+            lines.append("- \(name(place)): " + place.pieces.map { brief($0, repository: repository) }.joined(separator: ", ") + idle)
+        }
+        lines.append("Go through it in this order and show me a plan first: what to keep, what to merge, what can go. Don't delete anything until I confirm.")
         return lines.joined(separator: "\n")
     }
 }

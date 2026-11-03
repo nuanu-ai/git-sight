@@ -17,9 +17,9 @@ struct GitSightApp: App {
         .defaultSize(width: 1360, height: 860)
         .commands {
             CommandGroup(after: .newItem) {
-                Button("Выбрать папку…", action: model.chooseRoot)
+                Button("Choose Folder…", action: model.chooseRoot)
                     .keyboardShortcut("o")
-                Button("Обновить", action: model.scan)
+                Button("Refresh", action: model.scan)
                     .keyboardShortcut("r")
                     .disabled(model.rootURL == nil || model.isScanning)
             }

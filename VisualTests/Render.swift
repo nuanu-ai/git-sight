@@ -10,7 +10,7 @@ enum VisualRenderer {
     static func main() async throws {
         let arguments = CommandLine.arguments
         guard arguments.count >= 8, let width = Int(arguments[5]), let height = Int(arguments[6]) else {
-            print("Usage: render <out.png> <folder> <repository|-> <uncommitted|branch|detached|stash|graph|-> <width> <height> <light|dark> [select|diff]")
+            print("Usage: render <out.png> <folder> <repository|-> <uncommitted|unpushed|detached|stash|unmerged|leftover|-> <width> <height> <light|dark> [diff]")
             exit(2)
         }
         let output = URL(fileURLWithPath: arguments[1])
@@ -22,27 +22,22 @@ enum VisualRenderer {
         let model = WorkspaceModel()
         model.scan()
         while model.isScanning { try await Task.sleep(for: .milliseconds(50)) }
+        // "-" leaves the overview on screen; a repository opens on its heaviest place, or on a piece of the given kind.
         if arguments[3] != "-", let repository = model.repositories.first(where: { $0.name == arguments[3] }) {
-            model.selectedPath = repository.path
-            if arguments[4] == "graph" {
-                model.selectedFindingID = WorkspaceModel.graphID(of: repository)
-            } else if arguments[4] != "-", let finding = repository.findings.first(where: { "\($0.kind)" == arguments[4] }) {
-                model.selectedFindingID = finding.id
+            model.open(repository)
+            if arguments[4] != "-",
+               let (place, piece) = repository.places.lazy.compactMap({ place in
+                   place.pieces.first { "\($0.kind)" == arguments[4] }.map { (place, $0) }
+               }).first {
+                model.select(place, piece: piece)
             }
-        }
-        for _ in 0..<60 where model.findingContent == nil && model.selectedFindingID != nil {
-            try await Task.sleep(for: .milliseconds(50))
-        }
-        if arguments.count > 8, case .history(let commits) = model.findingContent {
-            model.selectedCommitHash = commits.first?.fullHash
-            for _ in 0..<60 where model.commitFiles == nil { try await Task.sleep(for: .milliseconds(50)) }
-        }
-        // "diff" also opens the first file's diff under the graph or the file list.
-        if arguments.count > 8, arguments[8] == "diff" {
-            var files = model.commitFiles
-            if case .files(let listed) = model.findingContent { files = listed }
-            if let file = files?.first { model.toggleDiff(of: file) }
-            for _ in 0..<60 where model.fileDiff == nil { try await Task.sleep(for: .milliseconds(50)) }
+            for _ in 0..<100 where model.history == nil { try await Task.sleep(for: .milliseconds(50)) }
+            for _ in 0..<60 where model.openRow != nil && model.rowFiles == nil { try await Task.sleep(for: .milliseconds(50)) }
+            // "diff" also opens the first file's diff under the graph.
+            if arguments.count > 8, arguments[8] == "diff", let file = model.rowFiles?.first {
+                model.toggleDiff(of: file)
+                for _ in 0..<60 where model.fileDiff == nil { try await Task.sleep(for: .milliseconds(50)) }
+            }
         }
 
         let window = NSWindow(

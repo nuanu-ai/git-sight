@@ -1,6 +1,6 @@
 #!/bin/sh
 # Renders the main window to a PNG. Arguments are passed to VisualTests/Render.swift, e.g.
-#   sh Scripts/render_window.sh window.png .build/DemoWorkspace billing-service branch 1360 860 light
+#   sh Scripts/render_window.sh window.png .build/DemoWorkspace billing-service unpushed 1360 860 light
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
