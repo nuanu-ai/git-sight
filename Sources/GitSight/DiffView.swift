@@ -71,7 +71,7 @@ struct DiffPane: View {
     }
 }
 
-/// Unified diff lines with both sides' line numbers, scrolling both ways.
+/// Unified diff lines with both sides' line numbers. Long lines wrap under their own text.
 private struct DiffLines: View {
     let diff: FileDiff
     @AppStorage(TextRole.sizeKey) private var textSize = TextRole.standardSize
@@ -80,30 +80,27 @@ private struct DiffLines: View {
         let digits = String(diff.lines.compactMap { max($0.oldLine ?? 0, $0.newLine ?? 0) }.max() ?? 0).count
         // Monospaced digits are about 0.6 of the font size wide.
         let numberWidth = CGFloat(max(digits, 2)) * TextRole.secondary.size(base: textSize) * 0.62 + 12
-        GeometryReader { geometry in
-            ScrollView([.vertical, .horizontal]) {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(diff.lines.enumerated()), id: \.offset) { _, line in
-                        row(line, numberWidth: numberWidth)
-                            .frame(minWidth: geometry.size.width, alignment: .leading)
-                            .background(background(line.kind))
-                    }
-                    if diff.isTruncated {
-                        Text("Showing the first \(RepositoryInspector.diffLineLimit) lines")
-                            .foregroundStyle(.secondary)
-                            .padding(12)
-                    }
+        // A lazy stack sizes itself by the rows drawn so far, so a sideways scroll could never reach
+        // a long line further down. Wrapping keeps every line inside the pane.
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(diff.lines.enumerated()), id: \.offset) { _, line in
+                    row(line, numberWidth: numberWidth)
+                        .background(background(line.kind))
                 }
-                .textRole(.secondary)
-                .monospaced()
-                // A short diff starts at the top left instead of floating in the middle.
-                .frame(minWidth: geometry.size.width, minHeight: geometry.size.height, alignment: .topLeading)
+                if diff.isTruncated {
+                    Text("Showing the first \(RepositoryInspector.diffLineLimit) lines")
+                        .foregroundStyle(.secondary)
+                        .padding(12)
+                }
             }
+            .textRole(.secondary)
+            .monospaced()
         }
     }
 
     private func row(_ line: DiffLine, numberWidth: CGFloat) -> some View {
-        HStack(spacing: 0) {
+        HStack(alignment: .firstTextBaseline, spacing: 0) {
             number(line.oldLine, width: numberWidth)
             number(line.newLine, width: numberWidth)
             Text(marker(line.kind))
@@ -112,7 +109,8 @@ private struct DiffLines: View {
             // Tabs as four spaces, so indentation lines up however the font measures a tab.
             Text(line.text.replacingOccurrences(of: "\t", with: "    "))
                 .foregroundStyle(line.kind == .hunk ? Color.secondary : Color.primary)
-                .fixedSize()
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.trailing, 16)
         }
         .padding(.vertical, 1)
