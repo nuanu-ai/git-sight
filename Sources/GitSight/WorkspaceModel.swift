@@ -71,6 +71,8 @@ final class WorkspaceModel {
     var focusRow: GraphRowID?
     /// The place whose tip row is still to be found in history that has not loaded yet.
     private var pendingTip: String?
+    /// A repository's first graph stays hidden until it has scrolled to `focusRow`, so its top never flashes first.
+    var graphWaitsForFocus = false
     /// The file whose diff is open under the graph.
     private(set) var diffFile: CommitFileSnapshot?
     /// Nil while it loads.
@@ -444,6 +446,7 @@ final class WorkspaceModel {
         isLoadingMore = false
         focusRow = nil
         pendingTip = nil
+        graphWaitsForFocus = false
         scope = nil
         selectedLine = nil
         selectedRow = nil
@@ -487,7 +490,29 @@ final class WorkspaceModel {
                     self.loadHistory(line: wanted, limit: RepositoryInspector.historyPage)
                     return
                 }
+                // The open row's files come in with the graph, so the graph is never drawn with that row still to open.
+                if let row = self.openRow, self.rowFiles == nil, self.rowFilesError == nil,
+                   let anchor = self.anchor(of: row), commits.contains(where: { $0.fullHash == anchor }) {
+                    if row.isCommit, let load = self.filesLoader(for: row, in: commits) {
+                        // A commit's files can only be read once a history describes the commit.
+                        let reader = Task.detached(priority: .userInitiated) { try load() }
+                        let files = await withTaskCancellationHandler { await reader.result } onCancel: { reader.cancel() }
+                        guard !Task.isCancelled, self.selectedPath == path else { return }
+                        if self.openRow == row, self.rowFiles == nil, self.rowFilesError == nil {
+                            switch files {
+                            case .success(let list): self.rowFiles = list
+                            case .failure(let error) where !(error is CancellationError): self.rowFilesError = error.localizedDescription
+                            default: break
+                            }
+                        }
+                    } else {
+                        // A worktree's or stash's files are already being read.
+                        await self.filesTask?.value
+                        guard !Task.isCancelled, self.selectedPath == path else { return }
+                    }
+                }
                 let switched = self.scope != line
+                let first = self.history == nil
                 self.scope = line
                 self.history = commits
                 self.historyLimit = limit
@@ -498,6 +523,7 @@ final class WorkspaceModel {
                     self.pendingTip = nil
                     self.focusRow = row
                 }
+                if first, self.focusRow != nil { self.graphWaitsForFocus = true }
                 if let row = self.openRow, let anchor = self.anchor(of: row) {
                     if !commits.contains(where: { $0.fullHash == anchor }) {
                         // Not drawn, so not open: its files would also reach the agent task unseen.
@@ -550,18 +576,7 @@ final class WorkspaceModel {
         filesTask?.cancel()
         if !refreshing { rowFiles = nil }
         rowFilesError = nil
-        guard let row = openRow, let repository = selectedRepository else { return }
-        let load: @Sendable () throws -> [CommitFileSnapshot]
-        switch row {
-        case .commit(let hash):
-            guard let commit = history?.first(where: { $0.fullHash == hash }) else { return }
-            load = { try RepositoryInspector().changedFiles(in: repository.path, commit: commit) }
-        case .uncommitted(let worktree):
-            load = { try RepositoryInspector().uncommittedFiles(in: worktree) }
-        case .stash(let hash):
-            let directory = repository.stashDirectory
-            load = { try RepositoryInspector().stashFiles(in: directory, stash: hash) }
-        }
+        guard let row = openRow, let load = filesLoader(for: row, in: history) else { return }
         let worker = Task.detached(priority: .userInitiated) { try load() }
         filesTask = Task { [weak self] in
             let result = await withTaskCancellationHandler { await worker.result } onCancel: { worker.cancel() }
@@ -583,6 +598,21 @@ final class WorkspaceModel {
                 self.rowFilesError = error.localizedDescription
                 self.closeDiff()
             }
+        }
+    }
+
+    /// What reads a row's files. A commit's need the history that describes the commit.
+    private func filesLoader(for row: GraphRowID, in commits: [CommitSnapshot]?) -> (@Sendable () throws -> [CommitFileSnapshot])? {
+        guard let repository = selectedRepository else { return nil }
+        switch row {
+        case .commit(let hash):
+            guard let commit = commits?.first(where: { $0.fullHash == hash }) else { return nil }
+            return { try RepositoryInspector().changedFiles(in: repository.path, commit: commit) }
+        case .uncommitted(let worktree):
+            return { try RepositoryInspector().uncommittedFiles(in: worktree) }
+        case .stash(let hash):
+            let directory = repository.stashDirectory
+            return { try RepositoryInspector().stashFiles(in: directory, stash: hash) }
         }
     }
 

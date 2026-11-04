@@ -29,6 +29,8 @@ struct RepositoryGraph: View {
     /// The file whose diff is open, highlighted among the files.
     let openFile: CommitFileSnapshot?
     @Binding var focus: GraphRowID?
+    /// Hidden until the first scroll to `focus`.
+    @Binding var waitsForFocus: Bool
     let onToggle: (GraphRowID) -> Void
     let onOpenFile: (CommitFileSnapshot) -> Void
     /// Called when the last row scrolls into view, to read further back.
@@ -170,6 +172,7 @@ struct RepositoryGraph: View {
                 }
                 .padding(.vertical, 4)
             }
+            .opacity(waitsForFocus ? 0 : 1)
             .onChange(of: focus, initial: true) { _, target in scroll(to: target, in: layout, proxy: proxy) }
             .onChange(of: layout.rows.count) { _, _ in scroll(to: focus, in: layout, proxy: proxy) }
             // The diff pane takes the lower part; the clicked file scrolls back into view.
@@ -184,12 +187,16 @@ struct RepositoryGraph: View {
 
     /// Scrolls a row near the top once it is in the graph, then forgets it.
     private func scroll(to target: GraphRowID?, in layout: Layout, proxy: ScrollViewProxy) {
-        guard let target else { return }
-        let id = key(target)
-        guard layout.rows.contains(where: { $0.id == id }) else { return }
+        let id = target.map(key)
+        guard let id, layout.rows.contains(where: { $0.id == id }) else {
+            // Nothing to scroll to: show the graph where it is.
+            if waitsForFocus { DispatchQueue.main.async { waitsForFocus = false } }
+            return
+        }
         DispatchQueue.main.async {
             proxy.scrollTo(id, anchor: UnitPoint(x: 0, y: 0.12))
             focus = nil
+            waitsForFocus = false
         }
     }
 

@@ -511,8 +511,11 @@ private struct GraphPane: View {
     @ViewBuilder
     private var graph: some View {
         VStack(spacing: 0) {
-            GraphLegend(scope: model.scope, showAllBranches: model.showAllBranches)
-            Divider()
+            // With the graph, not before it: the title is only known once the read says which line it shows.
+            if model.history != nil {
+                GraphLegend(scope: model.scope, showAllBranches: model.showAllBranches)
+                Divider()
+            }
             if let error = model.historyError {
                 ContentUnavailableView("Couldn't read the history", systemImage: "exclamationmark.triangle", description: Text(error))
             } else if let commits = model.history {
@@ -526,6 +529,7 @@ private struct GraphPane: View {
                     filesError: model.rowFilesError,
                     openFile: model.diffFile,
                     focus: $model.focusRow,
+                    waitsForFocus: $model.graphWaitsForFocus,
                     onToggle: model.toggle,
                     onOpenFile: model.toggleDiff,
                     onReachEnd: model.loadMoreHistory
