@@ -42,14 +42,15 @@ struct RepositoryGraph: View {
     private var laneSpacing: CGFloat { (textSize * 0.8).rounded() }
     /// Radius of the turn where a line leaves or joins a row.
     private static let turn: CGFloat = 5
-    /// Muted lane colors; orange and red stay with the verdicts.
+    /// Lane colors with a little gray in them, so they tell lanes apart without glaring;
+    /// orange and red stay with the verdicts.
     static let laneColors: [Color] = [
-        Color(red: 0.33, green: 0.5, blue: 0.75),
-        Color(red: 0.58, green: 0.46, blue: 0.75),
-        Color(red: 0.3, green: 0.6, blue: 0.57),
-        Color(red: 0.74, green: 0.45, blue: 0.58),
-        Color(red: 0.45, green: 0.6, blue: 0.4),
-        Color(red: 0.45, green: 0.47, blue: 0.72)
+        Color(red: 0.24, green: 0.5, blue: 0.82),
+        Color(red: 0.58, green: 0.4, blue: 0.84),
+        Color(red: 0.16, green: 0.6, blue: 0.56),
+        Color(red: 0.8, green: 0.36, blue: 0.58),
+        Color(red: 0.38, green: 0.6, blue: 0.28),
+        Color(red: 0.4, green: 0.42, blue: 0.82)
     ]
 
     private enum Row {
@@ -475,7 +476,7 @@ enum GraphLabel: Hashable {
     }
 }
 
-/// A label on a commit. Branches get a soft tint of their lane; worktrees an outline; the rest stays gray.
+/// A label on a commit. Branches are filled with their lane's color; worktrees get an outline; the rest stays gray.
 struct LabelPill: View {
     let label: GraphLabel
     let color: Color
@@ -491,9 +492,10 @@ struct LabelPill: View {
             if case .branch(_, true, _) = label {
                 Image(systemName: "cloud")
                     .imageScale(.small)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.white.opacity(0.75))
             }
         }
+        .foregroundStyle(isBranch ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
         .textRole(role)
         .fontWeight(.medium)
         .padding(.horizontal, 6)
@@ -513,16 +515,20 @@ struct LabelPill: View {
         }
     }
 
+    private var isBranch: Bool {
+        if case .branch = label { return true }
+        return false
+    }
+
     private var iconColor: Color {
-        if case .branch = label { return color }
-        return .secondary
+        isBranch ? .white.opacity(0.85) : .secondary
     }
 
     /// Circular ends: the default continuous capsule draws stray ticks at the ends of short pills on macOS 26.
     @ViewBuilder
     private var background: some View {
         switch label {
-        case .branch: Capsule(style: .circular).fill(color.opacity(0.18))
+        case .branch: Capsule(style: .circular).fill(color)
         case .folder: Capsule(style: .circular).strokeBorder(Color.secondary.opacity(0.45), lineWidth: 1)
         case .remote, .head, .tag: Capsule(style: .circular).fill(Color.secondary.opacity(0.14))
         }
