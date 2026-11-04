@@ -36,6 +36,7 @@ final class WorkspaceModel {
     // and the Command Line Tools do not ship its plugin.
     var overviewSort = OverviewSort.weight
     var showsWeightInfo = false
+    var showsCleanList = false
     /// The row or line under the pointer, for its hover highlight.
     var hoveredID: String?
     /// What was just copied, for a moment of confirmation: a place's id, or a repository's path.

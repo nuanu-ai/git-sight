@@ -43,16 +43,10 @@ struct OverviewView: View {
                         model.open(repository, column: column)
                     }
                 }
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .firstTextBaseline, spacing: 16) {
-                        CleanList(repositories: clean, open: { model.open($0) })
-                        Spacer(minLength: 0)
-                        VerdictLegend()
-                    }
-                    VStack(alignment: .leading, spacing: 8) {
-                        CleanList(repositories: clean, open: { model.open($0) })
-                        VerdictLegend()
-                    }
+                HStack(alignment: .firstTextBaseline, spacing: 16) {
+                    VerdictLegend()
+                    Spacer(minLength: 0)
+                    CleanButton(model: model, repositories: clean)
                 }
                 .padding(.top, 16)
             }
@@ -91,13 +85,14 @@ struct OverviewColumns {
     let showsIcons: Bool
 
     init(width: CGFloat) {
-        let total = min(max(0, width - 32), 1120)
+        let total = max(0, width - 32)
         compact = width < 860
         showsIcons = width >= 1180
         name = total * (compact ? 0.18 : 0.17)
-        weight = total * (compact ? 0.12 : 0.15)
         kind = total * (compact ? 0.116 : 0.12)
-        idle = total * (compact ? 0.12 : 0.08)
+        // "11 months" fits whatever the width; the weight's bar gives up the room.
+        idle = max(total * (compact ? 0.12 : 0.08), 96)
+        weight = total * (compact ? 0.24 : 0.23) - idle
     }
 
     var total: CGFloat { name + weight + kind * CGFloat(WorkColumn.allCases.count) + idle }
@@ -316,37 +311,57 @@ private struct Bubble: View {
     }
 }
 
-/// Clean repositories as one line of links, wrapping like text.
-private struct CleanList: View {
+/// Clean repositories behind one button, so they don't take a line each or a wall of links under the table.
+private struct CleanButton: View {
+    @Bindable var model: WorkspaceModel
     let repositories: [RepositorySnapshot]
-    let open: (RepositorySnapshot) -> Void
 
     var body: some View {
         if !repositories.isEmpty {
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Image(systemName: "checkmark")
-                    .imageScale(.small)
-                Text(links)
-                    .environment(\.openURL, OpenURLAction { url in
-                        guard let repository = repositories.first(where: { $0.path == url }) else { return .discarded }
-                        open(repository)
-                        return .handled
-                    })
+            Button {
+                model.showsCleanList.toggle()
+            } label: {
+                Label("\(repositories.count) clean", systemImage: "checkmark")
             }
+            .buttonStyle(.borderless)
             .textRole(.secondary)
             .foregroundStyle(.secondary)
+            .fixedSize()
+            .help("Repositories with nothing left behind")
+            .popover(isPresented: $model.showsCleanList, arrowEdge: .bottom) {
+                if repositories.count > 14 {
+                    ScrollView { list }
+                        .frame(height: 420)
+                } else {
+                    list
+                }
+            }
         }
     }
 
-    private var links: AttributedString {
-        var text = AttributedString("Clean: ")
-        for (index, repository) in repositories.sorted(by: { $0.name.localizedStandardCompare($1.name) == .orderedAscending }).enumerated() {
-            if index > 0 { text += AttributedString(", ") }
-            var name = AttributedString(repository.name)
-            name.link = repository.path
-            text += name
+    private var list: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(repositories.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }, id: \.path) { repository in
+                Button {
+                    model.showsCleanList = false
+                    model.open(repository)
+                } label: {
+                    Text(repository.name)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(RoundedRectangle(cornerRadius: 5).fill(model.hoveredID == "clean:\(repository.path.path)" ? Color.accentColor.opacity(0.16) : .clear))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .hoverID("clean:\(repository.path.path)", in: model)
+                .help(RepositoryText.path(repository.path))
+            }
         }
-        return text
+        .padding(8)
+        .frame(width: 260, alignment: .leading)
     }
 }
 
