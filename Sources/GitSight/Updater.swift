@@ -74,7 +74,7 @@ struct UpdatePill: View {
             }
             .buttonStyle(.borderedProminent)
             .buttonBorderShape(.capsule)
-            .help("Download git-sight \(version) and restart")
+            .help("Download Git Sight \(version) and restart")
         }
     }
 }

@@ -84,6 +84,6 @@ Publish the zip before main gets the new appcast, so the app never sees a link t
   git commit -m "release: $VERSION" $PLIST appcast.xml
   git tag $TAG
   git push origin $TAG
-  gh release create $TAG $ZIP --verify-tag --title "git-sight $VERSION" --notes "..."
+  gh release create $TAG $ZIP --verify-tag --title "Git Sight $VERSION" --notes "..."
   git push origin main
 EOF

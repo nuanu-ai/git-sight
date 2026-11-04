@@ -70,7 +70,7 @@ private struct WorkspaceStateView: View {
             ContentUnavailableView {
                 Label("Where are your repositories?", systemImage: "folder.badge.questionmark")
             } description: {
-                Text("git-sight finds every git repository in a folder and shows work that isn't on the server yet. It only reads and never changes anything.")
+                Text("Git Sight finds every git repository in a folder and shows work that isn't on the server yet. It only reads and never changes anything.")
             } actions: {
                 Button("Choose Folder…", action: model.chooseRoot)
                     .buttonStyle(.borderedProminent)
