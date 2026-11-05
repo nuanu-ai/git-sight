@@ -48,24 +48,25 @@ struct RepositoryGraph: View {
     private var bend: CGFloat { min(rowHeight / 4, laneSpacing / 2) }
     /// Lines are thin, as in VS Code; the dots carry the weight.
     private static let lineWidth: CGFloat = 1
-    /// Branch label colors with a little gray in them, so labels read without glaring;
-    /// orange and red stay with the verdicts. The first is the current branch's.
+    /// Branch label colors with a little gray in them, so labels read without glaring. The hues are VS Code's graph
+    /// palette, made to tell apart with color blindness too, in an order that never puts two alike side by side.
+    /// Orange and red stay with the verdicts, so VS Code's amber is a gold here. The first is the current branch's.
     static let laneColors: [Color] = [
         Color(red: 0.24, green: 0.5, blue: 0.82),
-        Color(red: 0.58, green: 0.4, blue: 0.84),
+        Color(red: 0.78, green: 0.22, blue: 0.49),
         Color(red: 0.16, green: 0.6, blue: 0.56),
-        Color(red: 0.8, green: 0.36, blue: 0.58),
-        Color(red: 0.38, green: 0.6, blue: 0.28),
-        Color(red: 0.4, green: 0.42, blue: 0.82)
+        Color(red: 0.66, green: 0.53, blue: 0.1),
+        Color(red: 0.58, green: 0.4, blue: 0.84),
+        Color(red: 0.36, green: 0.58, blue: 0.24)
     ]
     /// The same colors at full strength for the thin lines, as bright as VS Code's.
     private static let lineColors: [Color] = [
-        Color(red: 0.22, green: 0.56, blue: 1),
+        Color(red: 0.22, green: 0.58, blue: 1),
+        Color(red: 0.86, green: 0.15, blue: 0.5),
+        Color(red: 0.25, green: 0.69, blue: 0.65),
+        Color(red: 0.93, green: 0.74, blue: 0.13),
         Color(red: 0.71, green: 0.43, blue: 1),
-        Color(red: 0.16, green: 0.73, blue: 0.66),
-        Color(red: 0.92, green: 0.3, blue: 0.6),
-        Color(red: 0.42, green: 0.76, blue: 0.3),
-        Color(red: 0.47, green: 0.5, blue: 1)
+        Color(red: 0.45, green: 0.76, blue: 0.27)
     ]
 
     /// A line's color: the base's gray, or one from the palettes above.
