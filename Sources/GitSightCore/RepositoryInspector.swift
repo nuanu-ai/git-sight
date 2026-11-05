@@ -249,7 +249,7 @@ public struct RepositoryInspector {
     /// How many commits a history reads at first and adds each time the user scrolls to its end.
     public static let historyPage = 300
 
-    /// Commits `git log` reaches from `revisions`, newest first, with graph lanes, at most `limit` of them.
+    /// Commits `git log` reaches from `revisions`, newest first and children before parents, at most `limit` of them.
     /// Boundary commits mark where the range starts, e.g. what the server already has.
     public func history(in repositoryURL: URL, revisions: [String], limit: Int = historyPage) throws -> [CommitSnapshot] {
         let format = "%m%x1F%H%x1F%h%x1F%s%x1F%an%x1F%cI%x1F%P%x1F%D%x1E"
@@ -268,7 +268,6 @@ public struct RepositoryInspector {
                 date: date,
                 parents: fields[6].split(whereSeparator: \.isWhitespace).map(String.init),
                 refs: Self.refs(fields[7]),
-                lane: 0,
                 isBoundary: fields[0] == "-"
             )
         }
@@ -276,7 +275,7 @@ public struct RepositoryInspector {
         if commits.count(where: { !$0.isBoundary }) >= limit {
             commits.removeAll(where: \.isBoundary)
         }
-        return Self.laidOut(commits)
+        return commits
     }
 
     /// The whole history behind `tips`, with commits that no remote branch holds marked.
@@ -897,56 +896,6 @@ public struct RepositoryInspector {
             let base = fields[4].split(separator: " ").first.map(String.init)
             return StashSnapshot(name: fields[0], hash: fields[1], message: fields[2], date: date, base: base)
         }
-    }
-
-    /// Assigns each commit a graph lane; `commits` must list children before parents.
-    private static func laidOut(_ commits: [CommitSnapshot]) -> [CommitSnapshot] {
-        var activeLanes: [String?] = []
-        var laidOutCommits: [CommitSnapshot] = []
-        for commit in commits {
-            let matchingLanes = activeLanes.indices.filter { activeLanes[$0] == commit.fullHash }
-            let lane = matchingLanes.first ?? activeLanes.firstIndex(of: nil) ?? activeLanes.count
-            if lane == activeLanes.count {
-                activeLanes.append(nil)
-            }
-            for matchingLane in matchingLanes {
-                activeLanes[matchingLane] = nil
-            }
-            activeLanes[lane] = nil
-
-            var parentLanes: [Int] = []
-            for (offset, parent) in commit.parents.enumerated() {
-                if offset == 0 {
-                    // The first parent continues this line even when a side line already waits for it;
-                    // the parent then takes the leftmost of the lanes waiting for it.
-                    activeLanes[lane] = parent
-                    parentLanes.append(lane)
-                } else if let waiting = activeLanes.firstIndex(of: parent) {
-                    parentLanes.append(waiting)
-                } else {
-                    let parentLane = activeLanes.firstIndex(of: nil) ?? activeLanes.count
-                    if parentLane == activeLanes.count {
-                        activeLanes.append(parent)
-                    } else {
-                        activeLanes[parentLane] = parent
-                    }
-                    parentLanes.append(parentLane)
-                }
-            }
-            laidOutCommits.append(CommitSnapshot(
-                fullHash: commit.fullHash,
-                shortHash: commit.shortHash,
-                subject: commit.subject,
-                author: commit.author,
-                date: commit.date,
-                parents: commit.parents,
-                refs: commit.refs,
-                lane: lane,
-                parentLanes: parentLanes,
-                isBoundary: commit.isBoundary
-            ))
-        }
-        return laidOutCommits
     }
 
     private func webURL(from remote: String) -> URL? {

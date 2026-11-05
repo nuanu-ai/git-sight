@@ -141,10 +141,6 @@ public struct CommitSnapshot: Equatable {
     public let date: Date
     public let parents: [String]
     public internal(set) var refs: [CommitRef]
-    public let lane: Int
-    /// The lane each parent's line runs down, in `parents` order. A lane stays held
-    /// for its parent until the parent's row, so a line drawn down it crosses no other commit.
-    public let parentLanes: [Int]
     /// The commit is outside the requested range and only marks where it starts, e.g. the fork point.
     public let isBoundary: Bool
     /// On no remote-tracking branch; set only in the history of a whole repository that has a remote.
@@ -158,8 +154,6 @@ public struct CommitSnapshot: Equatable {
         date: Date,
         parents: [String],
         refs: [CommitRef],
-        lane: Int,
-        parentLanes: [Int] = [],
         isBoundary: Bool = false
     ) {
         self.fullHash = fullHash
@@ -169,8 +163,6 @@ public struct CommitSnapshot: Equatable {
         self.date = date
         self.parents = parents
         self.refs = refs
-        self.lane = lane
-        self.parentLanes = parentLanes
         self.isBoundary = isBoundary
     }
 }

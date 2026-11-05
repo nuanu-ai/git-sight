@@ -305,7 +305,8 @@ enum CommitTopologyIntegrationTests {
             var commits: [String] = []
             for index in 0..<16 {
                 var parents: [String] = []
-                if !commits.isEmpty {
+                // Now and then a second root, as an orphan branch like gh-pages starts one.
+                if !commits.isEmpty, random(12) > 0 {
                     // Mostly continue a recent line, sometimes fork from older work, sometimes merge.
                     parents.append(commits[commits.count - 1 - random(min(3, commits.count))])
                     if commits.count > 2, random(10) < 4 {
@@ -342,7 +343,9 @@ enum CommitTopologyIntegrationTests {
             }
             for (from, to) in row.next.enumerated() {
                 guard let to else { continue }
-                if (min(from, to)...max(from, to)).contains(row.dot) {
+                // Under a commit with no parents its lane is free, and a line may bend into it below the dot.
+                let free = commit.parents.isEmpty && to == row.dot
+                if !free, (min(from, to)...max(from, to)).contains(row.dot) {
                     crossings.append("a line passes through \(commit.subject)")
                 }
             }

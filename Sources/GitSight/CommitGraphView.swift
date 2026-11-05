@@ -44,9 +44,11 @@ struct RepositoryGraph: View {
     private var laneSpacing: CGFloat { (textSize * 0.8).rounded() }
     /// Radius of the turn where a line leaves or joins a row: a quarter circle a lane wide, as in VS Code.
     private var turn: CGFloat { min(laneSpacing, rowHeight / 2) }
+    /// Radius of the bends where a line moves over into a lane freed on its left.
+    private var bend: CGFloat { min(rowHeight / 4, laneSpacing / 2) }
     /// Lines are thin, as in VS Code; the dots carry the weight.
     private static let lineWidth: CGFloat = 1
-    /// Line colors with a little gray in them, so they tell lines apart without glaring;
+    /// Branch label colors with a little gray in them, so labels read without glaring;
     /// orange and red stay with the verdicts. The first is the current branch's.
     static let laneColors: [Color] = [
         Color(red: 0.24, green: 0.5, blue: 0.82),
@@ -56,6 +58,31 @@ struct RepositoryGraph: View {
         Color(red: 0.38, green: 0.6, blue: 0.28),
         Color(red: 0.4, green: 0.42, blue: 0.82)
     ]
+    /// The same colors at full strength for the thin lines, as bright as VS Code's.
+    private static let lineColors: [Color] = [
+        Color(red: 0.22, green: 0.56, blue: 1),
+        Color(red: 0.71, green: 0.43, blue: 1),
+        Color(red: 0.16, green: 0.73, blue: 0.66),
+        Color(red: 0.92, green: 0.3, blue: 0.6),
+        Color(red: 0.42, green: 0.76, blue: 0.3),
+        Color(red: 0.47, green: 0.5, blue: 1)
+    ]
+
+    /// A line's color: the base's gray, or one from the palettes above.
+    private enum Hue: Hashable {
+        case base
+        case palette(Int)
+
+        var line: Color {
+            if case .palette(let index) = self { return RepositoryGraph.lineColors[index] }
+            return Color(white: 0.55)
+        }
+
+        var label: Color {
+            if case .palette(let index) = self { return RepositoryGraph.laneColors[index] }
+            return .gray
+        }
+    }
 
     private enum Row {
         case commit(Int)
@@ -73,12 +100,16 @@ struct RepositoryGraph: View {
         var commitIndex: [String: Int] = [:]
         var extraRow: [Int: Int] = [:]
         var extraLane: [Int: Int] = [:]
+        /// Each commit's row of the graph, by its index in `commits`.
+        var graph: [GraphRow<Hue>] = []
+        /// The lines running down each row; for a commit's row, the ones going on below it.
+        var lines: [[GraphRow<Hue>.Line]] = []
         /// Where each row's text starts: after the rightmost line crossing it.
         var indent: [CGFloat] = []
         /// The unpushed commit each row belongs to, for the band of work only this Mac has.
         var local: [Bool] = []
         /// Each commit's color, by hash: the color of the line of history it is on.
-        var colors: [String: Color] = [:]
+        var colors: [String: Hue] = [:]
     }
 
     private func key(_ id: GraphRowID) -> String {
@@ -120,85 +151,65 @@ struct RepositoryGraph: View {
             appendFiles(after: .commit(commit.fullHash), local: commit.isUnpushed)
         }
         layout.local = owners
-        layout.colors = colors()
+        layout.graph = graph()
+        for (index, row) in layout.graph.enumerated() { layout.colors[commits[index].fullHash] = row.color }
 
-        // Lanes that start and stop crossing rows, swept from top to bottom.
-        let count = layout.rows.count
-        var opens = Array(repeating: [Int](), count: count + 1)
-        var closes = Array(repeating: [Int](), count: count + 1)
-        for commit in commits {
-            guard let row = layout.commitRow[commit.fullHash] else { continue }
-            opens[row].append(commit.lane)
-            closes[row + 1].append(commit.lane)
-            for (offset, parent) in commit.parents.enumerated() {
-                let lane = offset < commit.parentLanes.count ? commit.parentLanes[offset] : commit.lane
-                opens[row].append(lane)
-                // A parent past the history limit: the line runs off the bottom.
-                closes[(layout.commitRow[parent] ?? count - 1) + 1].append(lane)
+        // Rows between commits, files and extras, carry on the lines the commit above sends down.
+        var running: [GraphRow<Hue>.Line] = []
+        var reach: [Int] = []
+        for item in layout.rows {
+            if case .commit(let index) = item.row {
+                let row = layout.graph[index]
+                running = row.output
+                reach.append(max(row.input.count, row.output.count, row.dot + 1) - 1)
+            } else {
+                reach.append(max(running.count - 1, 0))
             }
-        }
-        var crossing: [Int: Int] = [:]
-        var reach = (0..<count).map { row -> Int in
-            for lane in closes[row] { crossing[lane, default: 0] -= 1 }
-            for lane in opens[row] { crossing[lane, default: 0] += 1 }
-            return crossing.filter { $0.value > 0 }.keys.max() ?? 0
+            layout.lines.append(running)
         }
         // The extras over one commit stack to the right of every line they cross, the top one furthest out,
         // so each dashed line runs down past the ones below it.
         for (anchor, stack) in extrasByAnchor {
-            guard let anchorRow = layout.commitRow[anchor], let top = stack.compactMap({ layout.extraRow[$0] }).min() else { continue }
-            let base = reach[top...anchorRow].max() ?? 0
+            guard let anchorRow = layout.commitRow[anchor], let index = layout.commitIndex[anchor] else { continue }
+            let row = layout.graph[index]
+            // Right of the lines a merge starts too, so a dashed line never runs down a merged branch's lane.
+            let first = max(row.input.count, row.output.count, row.dot + 1)
             for (position, extra) in stack.enumerated() {
-                guard let row = layout.extraRow[extra] else { continue }
-                let lane = base + stack.count - position
+                guard let extraRow = layout.extraRow[extra] else { continue }
+                let lane = first + stack.count - 1 - position
                 layout.extraLane[extra] = lane
                 // The commit's own row too: the dashed line turns into it there, and its labels start past the turn.
-                for crossed in row...anchorRow { reach[crossed] = max(reach[crossed], lane) }
+                for crossed in extraRow...anchorRow { reach[crossed] = max(reach[crossed], lane) }
             }
         }
         layout.indent = reach.map { laneX($0) + 12 }
         return layout
     }
 
-    /// Colors follow lines of history, as in VS Code, not lanes: a line keeps one color from its tip down, and a
-    /// new line, a tip or a merged branch, takes the next. The current branch is blue down to where it meets the
-    /// base, and the base's line is gray, so work that is not in the base stands out.
-    private func colors() -> [String: Color] {
-        let lanes = Dictionary(commits.map { ($0.fullHash, $0.lane) }) { first, _ in first }
-        let others = Self.laneColors.dropFirst()
+    /// Lanes and colors as VS Code has them. The current branch is blue down to where it meets the base, and the
+    /// base's line and everything down its first parents are gray, so work that is not in the base stands out.
+    /// Every other line takes the next color where it starts, at a branch tip or where a branch was merged.
+    private func graph() -> [GraphRow<Hue>] {
+        let index = Dictionary(commits.enumerated().map { ($0.element.fullHash, $0.offset) }) { first, _ in first }
+        var base = Set<String>()
+        var tip = commits.firstIndex { commit in
+            commit.refs.contains { ref in
+                guard let baseRef else { return false }
+                return (ref.kind == .remoteBranch && "refs/remotes/\(ref.name)" == baseRef) || (ref.kind == .branch && "refs/heads/\(ref.name)" == baseRef)
+            }
+        }
+        while let current = tip, base.insert(commits[current].fullHash).inserted {
+            tip = commits[current].parents.first.flatMap { index[$0] }
+        }
         var next = 0
-        func fresh() -> Color {
+        return CommitGraph.rows(commits, color: { commit in
+            if commit.refs.contains(where: { $0.kind == .branch && $0.isHead }) { return .palette(0) }
+            return base.contains(commit.fullHash) ? .base : nil
+        }, fresh: {
             defer { next += 1 }
-            return others[others.startIndex + next % others.count]
-        }
-        var colors: [String: Color] = [:]
-        for commit in commits {
-            let color: Color
-            if commit.refs.contains(where: { $0.kind == .branch && $0.isHead }) {
-                color = Self.laneColors[0]
-            } else if let baseRef, commit.refs.contains(where: { ref in
-                (ref.kind == .remoteBranch && "refs/remotes/\(ref.name)" == baseRef) || (ref.kind == .branch && "refs/heads/\(ref.name)" == baseRef)
-            }) {
-                color = Self.baseColor
-            } else {
-                color = colors[commit.fullHash] ?? fresh()
-            }
-            colors[commit.fullHash] = color
-            for (offset, parent) in commit.parents.enumerated() where colors[parent] == nil {
-                // The line goes on into a parent in its own lane; a parent another line reaches from the side
-                // keeps the color of its own line, and a merged branch starts a line of its own.
-                let lane = offset < commit.parentLanes.count ? commit.parentLanes[offset] : commit.lane
-                if offset == 0, lane == commit.lane, lanes[parent] == commit.lane {
-                    colors[parent] = color
-                } else if offset > 0 {
-                    colors[parent] = fresh()
-                }
-            }
-        }
-        return colors
+            return .palette(1 + next % (Self.laneColors.count - 1))
+        })
     }
-
-    private static let baseColor = Color.gray
 
     var body: some View {
         let layout = layout()
@@ -281,11 +292,11 @@ struct RepositoryGraph: View {
     }
 
     @ViewBuilder
-    private func row(_ row: Row, indent: CGFloat, colors: [String: Color]) -> some View {
+    private func row(_ row: Row, indent: CGFloat, colors: [String: Hue]) -> some View {
         switch row {
         case .commit(let index):
             let commit = commits[index]
-            CommitRow(commit: commit, laneColor: colors[commit.fullHash] ?? Self.baseColor, folders: folders[commit.fullHash] ?? [])
+            CommitRow(commit: commit, laneColor: (colors[commit.fullHash] ?? .base).label, folders: folders[commit.fullHash] ?? [])
                 .padding(.leading, indent)
                 .contentShape(Rectangle())
                 .onTapGesture { onToggle(.commit(commit.fullHash)) }
@@ -373,32 +384,34 @@ struct RepositoryGraph: View {
                     layer.fill(Path(edge), with: .color(.orange))
                 }
             }
-            // Lines go on a layer of their own, with the nodes cut out of it, so no line shows through a ring.
+            // Lines go on a layer of their own, with a ring of space cut around every node, as in VS Code.
             context.drawLayer { context in
-                for commit in commits {
-                    guard let row = layout.commitRow[commit.fullHash] else { continue }
-                    let start = CGPoint(x: laneX(commit.lane), y: y(row))
-                    for (offset, parentHash) in commit.parents.enumerated() {
-                        // The core holds this lane for the parent until the parent's row, so nothing else sits on it.
-                        let lane = offset < commit.parentLanes.count ? commit.parentLanes[offset] : commit.lane
-                        let parent = layout.commitIndex[parentHash].flatMap { index in
-                            layout.commitRow[parentHash].map { CGPoint(x: laneX(commits[index].lane), y: y($0)) }
+                // One path per color, stroked once, so a long history draws in a few calls.
+                var paths: [Hue: Path] = [:]
+                for (row, lines) in layout.lines.enumerated() {
+                    let top = CGFloat(row) * rowHeight
+                    guard case .commit(let index) = layout.rows[row].row else {
+                        // Lines run straight through rows of files and extras.
+                        for (lane, line) in lines.enumerated() {
+                            paths[line.color, default: Path()].addPath(vertical(lane, from: top, to: top + rowHeight))
                         }
-                        let path = edge(from: start, along: laneX(lane), to: parent, bottom: size.height)
-                        // A line down the child's lane is the child's; one out to the parent's lane is the parent's.
-                        let owner = lane == commit.lane ? commit.fullHash : parentHash
-                        context.stroke(path, with: .color(layout.colors[owner] ?? layout.colors[commit.fullHash] ?? Self.baseColor), lineWidth: Self.lineWidth)
+                        continue
                     }
+                    for (path, hue) in Self.lines(layout.graph[index], at: top, rowHeight: rowHeight, laneX: laneX, turn: turn, bend: bend) {
+                        paths[hue, default: Path()].addPath(path)
+                    }
+                }
+                for (hue, path) in paths {
+                    context.stroke(path, with: .color(hue.line), lineWidth: Self.lineWidth)
                 }
                 for (index, extra) in extras.enumerated() {
                     guard let row = layout.extraRow[index], let lane = layout.extraLane[index],
-                          let anchorRow = layout.commitRow[extra.anchor],
-                          let anchor = layout.commitIndex[extra.anchor].map({ commits[$0] }) else { continue }
-                    // One color for everything on a commit, its lane's; the node's shape tells files from a stash.
-                    let color = layout.colors[anchor.fullHash] ?? Self.baseColor
+                          let anchorRow = layout.commitRow[extra.anchor], let anchor = layout.commitIndex[extra.anchor] else { continue }
+                    // One color for everything on a commit, its line's; the node's shape tells files from a stash.
+                    let color = layout.graph[anchor].color.line
                     let center = CGPoint(x: laneX(lane), y: y(row))
                     // Drawn out from the commit, so where two lines share the way in, their dashes fall on the same spots.
-                    let commit = CGPoint(x: laneX(anchor.lane), y: y(anchorRow))
+                    let commit = CGPoint(x: laneX(layout.graph[anchor].dot), y: y(anchorRow))
                     var path = Path()
                     path.move(to: commit)
                     path.addArc(tangent1End: CGPoint(x: center.x, y: commit.y), tangent2End: center, radius: turn)
@@ -408,31 +421,34 @@ struct RepositoryGraph: View {
                 context.blendMode = .destinationOut
                 for (index, extra) in extras.enumerated() {
                     guard let row = layout.extraRow[index], let lane = layout.extraLane[index] else { continue }
-                    context.fill(Self.extraNode(extra.kind, at: CGPoint(x: laneX(lane), y: y(row))), with: .color(.black))
+                    let node = Self.extraNode(extra.kind, at: CGPoint(x: laneX(lane), y: y(row)))
+                    context.fill(node, with: .color(.black))
+                    context.stroke(node, with: .color(.black), lineWidth: 4)
                 }
-                for commit in commits where commit.parents.count > 1 || Self.isHead(commit) {
+                for (index, commit) in commits.enumerated() {
                     guard let row = layout.commitRow[commit.fullHash] else { continue }
-                    context.fill(Self.circle(CGPoint(x: laneX(commit.lane), y: y(row)), 6), with: .color(.black))
+                    let space: CGFloat = Self.isHead(commit) ? 8 : commit.parents.count > 1 ? 7 : 6
+                    context.fill(Self.circle(CGPoint(x: laneX(layout.graph[index].dot), y: y(row)), space), with: .color(.black))
                 }
             }
             for (index, extra) in extras.enumerated() {
                 guard let row = layout.extraRow[index], let lane = layout.extraLane[index],
-                      let anchor = layout.commitIndex[extra.anchor].map({ commits[$0] }) else { continue }
+                      let anchor = layout.commitIndex[extra.anchor] else { continue }
                 let node = Self.extraNode(extra.kind, at: CGPoint(x: laneX(lane), y: y(row)))
-                let color = layout.colors[anchor.fullHash] ?? Self.baseColor
-                context.stroke(node, with: .color(color), style: StrokeStyle(lineWidth: 1.5, dash: extra.kind == .uncommitted ? [2.5, 2] : []))
+                context.stroke(node, with: .color(layout.graph[anchor].color.line), style: StrokeStyle(lineWidth: 1.5, dash: extra.kind == .uncommitted ? [2.5, 2] : []))
             }
-            for commit in commits {
+            // Nodes sized as VS Code sizes them.
+            for (index, commit) in commits.enumerated() {
                 guard let row = layout.commitRow[commit.fullHash] else { continue }
-                let center = CGPoint(x: laneX(commit.lane), y: y(row))
-                let color = layout.colors[commit.fullHash] ?? Self.baseColor
+                let center = CGPoint(x: laneX(layout.graph[index].dot), y: y(row))
+                let color = layout.graph[index].color.line
                 if Self.isHead(commit) {
-                    // The commit checked out: an open ring, as in VS Code.
+                    // The commit checked out: an open ring.
                     context.stroke(Self.circle(center, 5), with: .color(color), lineWidth: 2)
                 } else if commit.parents.count > 1 {
-                    // A merge: a ring with a dot.
-                    context.stroke(Self.circle(center, 5), with: .color(color), lineWidth: 1.5)
-                    context.fill(Self.circle(center, 2.5), with: .color(color))
+                    // A merge: a thin ring with a dot.
+                    context.stroke(Self.circle(center, 4.5), with: .color(color), lineWidth: 1)
+                    context.fill(Self.circle(center, 2), with: .color(color))
                 } else {
                     context.fill(Self.circle(center, 4), with: .color(color))
                 }
@@ -441,24 +457,55 @@ struct RepositoryGraph: View {
         .accessibilityHidden(true)
     }
 
-    /// A line from a commit to its parent: across the child's row to the held lane, down it,
-    /// and across the parent's row into the parent, each turn a quarter circle as in VS Code.
-    private func edge(from start: CGPoint, along x: CGFloat, to end: CGPoint?, bottom: CGFloat) -> Path {
-        var path = Path()
-        path.move(to: start)
-        if x != start.x {
-            path.addArc(tangent1End: CGPoint(x: x, y: start.y), tangent2End: CGPoint(x: x, y: start.y + turn), radius: turn)
+    private func vertical(_ lane: Int, from top: CGFloat, to bottom: CGFloat) -> Path {
+        Path { path in
+            path.move(to: CGPoint(x: laneX(lane), y: top))
+            path.addLine(to: CGPoint(x: laneX(lane), y: bottom))
         }
-        guard let end else {
-            // The parent is past the history limit: the line runs off the bottom in its lane.
+    }
+
+    /// A commit's row, drawn as VS Code draws it: lines that go on run straight down or bend over into a lane
+    /// freed on their left; lines that end turn in to the dot; the first parent's line leaves the dot straight
+    /// down, and a merged branch's turns out to its own lane on the right.
+    private static func lines(
+        _ row: GraphRow<Hue>, at top: CGFloat, rowHeight: CGFloat, laneX: (Int) -> CGFloat, turn: CGFloat, bend: CGFloat
+    ) -> [(Path, Hue)] {
+        let middle = top + rowHeight / 2
+        let bottom = top + rowHeight
+        let dot = laneX(row.dot)
+        var paths: [(Path, Hue)] = []
+        for (lane, line) in row.input.enumerated() {
+            let x = laneX(lane)
+            var path = Path()
+            path.move(to: CGPoint(x: x, y: top))
+            if let next = row.next[lane] {
+                let to = laneX(next)
+                if next != lane {
+                    // Under a commit with no parents a line can move into the dot's own lane; it bends in below the dot.
+                    let level = next == row.dot ? bottom - bend : middle
+                    path.addArc(tangent1End: CGPoint(x: x, y: level), tangent2End: CGPoint(x: to, y: level), radius: bend)
+                    path.addArc(tangent1End: CGPoint(x: to, y: level), tangent2End: CGPoint(x: to, y: bottom), radius: bend)
+                }
+                path.addLine(to: CGPoint(x: to, y: bottom))
+            } else {
+                if lane != row.dot {
+                    path.addArc(tangent1End: CGPoint(x: x, y: middle), tangent2End: CGPoint(x: dot, y: middle), radius: turn)
+                }
+                path.addLine(to: CGPoint(x: dot, y: middle))
+            }
+            paths.append((path, line.color))
+        }
+        for parent in row.parents {
+            let x = laneX(parent)
+            var path = Path()
+            path.move(to: CGPoint(x: dot, y: middle))
+            if parent != row.dot {
+                path.addArc(tangent1End: CGPoint(x: x, y: middle), tangent2End: CGPoint(x: x, y: bottom), radius: turn)
+            }
             path.addLine(to: CGPoint(x: x, y: bottom))
-            return path
+            paths.append((path, row.output[parent].color))
         }
-        if x != end.x {
-            path.addArc(tangent1End: CGPoint(x: x, y: end.y), tangent2End: end, radius: turn)
-        }
-        path.addLine(to: end)
-        return path
+        return paths
     }
 
     /// The checked-out commit: the current branch's, or a detached HEAD's.

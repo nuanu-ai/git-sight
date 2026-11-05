@@ -24,6 +24,39 @@ public enum CommitGraph {
     /// Lays out `commits`, children before parents, a row each. `color` gives a commit a color of its own,
     /// and `fresh` hands out the next color for a line that needs one.
     public static func rows<Color>(_ commits: [CommitSnapshot], color: (CommitSnapshot) -> Color?, fresh: () -> Color) -> [GraphRow<Color>] {
-        []
+        let byHash = Dictionary(commits.map { ($0.fullHash, $0) }) { first, _ in first }
+        var lines: [GraphRow<Color>.Line] = []
+        var rows: [GraphRow<Color>] = []
+        for commit in commits {
+            let input = lines
+            // The dot sits on the first line that comes for it; a commit no line comes for starts right of every line.
+            let dot = input.firstIndex { $0.target == commit.fullHash } ?? input.count
+            let own = color(commit) ?? (dot < input.count ? input[dot].color : fresh())
+            var output: [GraphRow<Color>.Line] = []
+            var next: [Int?] = []
+            var parents: [Int] = []
+            func start(_ parent: String, _ color: Color) {
+                parents.append(output.count)
+                output.append(.init(target: parent, color: color))
+            }
+            for (index, line) in input.enumerated() {
+                if line.target == commit.fullHash {
+                    // Every line that comes for the commit ends here; the first parent goes on in the dot's place.
+                    if index == dot, let first = commit.parents.first { start(first, own) }
+                    next.append(nil)
+                } else {
+                    next.append(output.count)
+                    output.append(line)
+                }
+            }
+            if dot == input.count, let first = commit.parents.first { start(first, own) }
+            // A merged branch's line starts right of every line, in its own color.
+            for parent in commit.parents.dropFirst() {
+                start(parent, byHash[parent].flatMap(color) ?? fresh())
+            }
+            rows.append(GraphRow(input: input, output: output, dot: dot, next: next, parents: parents, color: own))
+            lines = output
+        }
+        return rows
     }
 }
