@@ -456,7 +456,7 @@ enum UnfinishedWorkIntegrationTests {
     }
 
     /// Features start from main and are merged into staging for QA; staging takes main in now and then.
-    /// Only main takes work for good, so a feature merged for QA alone is still unfinished.
+    /// Only main takes work for good, so a feature merged for QA alone, then fixed, is still unfinished.
     static func testStagingForQAIsNotTheBase() throws {
         let rootURL = scratchURL()
         let originURL = rootURL.appendingPathComponent("origin.git")
@@ -490,13 +490,144 @@ enum UnfinishedWorkIntegrationTests {
         try runGit(in: repositoryURL, ["merge", "--no-ff", "main", "-m", "Merge main"])
         try runGit(in: repositoryURL, ["merge", "--no-ff", "checkout", "-m", "Merge checkout for QA"])
         try runGit(in: repositoryURL, ["push", "origin", "staging"])
+        // QA found a bug; the fix goes on the feature, not on staging.
+        try runGit(in: repositoryURL, ["switch", "checkout"])
+        try commit("checkout-fix")
+        try runGit(in: repositoryURL, ["push", "origin", "checkout"])
         try runGit(in: repositoryURL, ["switch", "main"])
         try runGit(in: repositoryURL, ["branch", "-D", "staging"])
 
         let snapshot = try RepositoryInspector().inspect(repositoryAt: repositoryURL)
         try expectEqual(snapshot.baseBranch, "main", "staging only tries work out")
-        try expectEqual(snapshot.branches.first { $0.name == "checkout" }?.unmergedCommits, 2, "a feature merged for QA alone is not in main")
+        try expectEqual(snapshot.branches.first { $0.name == "checkout" }?.unmergedCommits, 3, "a feature merged for QA alone is not in main")
         try expectEqual(snapshot.unfinishedBranches.map(\.name), ["checkout", "search"], "both features are unfinished")
+    }
+
+    /// Every pull request has landed in staging and none is open. The branches left behind were started from
+    /// staging and merged into it: done, though main takes them only at the next release.
+    static func testBranchesMergedIntoTheIntegrationBranchAreDone() throws {
+        let rootURL = scratchURL()
+        let originURL = rootURL.appendingPathComponent("origin.git")
+        let repositoryURL = rootURL.appendingPathComponent("repository")
+        try FileManager.default.createDirectory(at: repositoryURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        try runGit(in: rootURL, ["init", "--bare", "-b", "main", originURL.path])
+        try runGit(in: repositoryURL, ["init", "-b", "main"])
+        try runGit(in: repositoryURL, ["config", "user.name", "Test User"])
+        try runGit(in: repositoryURL, ["config", "user.email", "test@example.com"])
+        func commit(_ name: String) throws {
+            try "\(name)\n".write(to: repositoryURL.appendingPathComponent("\(name).txt"), atomically: true, encoding: .utf8)
+            try runGit(in: repositoryURL, ["add", "\(name).txt"])
+            try runGit(in: repositoryURL, ["commit", "-m", name])
+        }
+        try commit("start")
+        try runGit(in: repositoryURL, ["remote", "add", "origin", originURL.path])
+        try runGit(in: repositoryURL, ["push", "-u", "origin", "main"])
+        try runGit(in: repositoryURL, ["remote", "set-head", "origin", "main"])
+        try runGit(in: repositoryURL, ["switch", "-c", "staging"])
+        try commit("pull-request-1")
+        try commit("pull-request-2")
+        try runGit(in: repositoryURL, ["push", "-u", "origin", "staging"])
+        for name in ["fix-a", "fix-b"] {
+            try runGit(in: repositoryURL, ["switch", "-c", name, "staging"])
+            try commit(name)
+            try runGit(in: repositoryURL, ["push", "-u", "origin", name])
+            try runGit(in: repositoryURL, ["switch", "staging"])
+            try runGit(in: repositoryURL, ["merge", "--no-ff", name, "-m", "Merge \(name)"])
+        }
+        try runGit(in: repositoryURL, ["push", "origin", "staging"])
+
+        let snapshot = try RepositoryInspector().inspect(repositoryAt: repositoryURL)
+        try expectEqual(snapshot.baseBranch, "staging", "the branches were started from staging")
+        try expectEqual(snapshot.unfinishedBranches.map(\.name), [], "both landed where pull requests land")
+    }
+
+    /// One experiment was started from a long rewrite on dev; the rest of the work starts from main.
+    /// One branch does not move the base, however far its line has gone.
+    static func testOneBranchOnAFarLineDoesNotMoveTheBase() throws {
+        let rootURL = scratchURL()
+        let originURL = rootURL.appendingPathComponent("origin.git")
+        let repositoryURL = rootURL.appendingPathComponent("repository")
+        try FileManager.default.createDirectory(at: repositoryURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        try runGit(in: rootURL, ["init", "--bare", "-b", "main", originURL.path])
+        try runGit(in: repositoryURL, ["init", "-b", "main"])
+        try runGit(in: repositoryURL, ["config", "user.name", "Test User"])
+        try runGit(in: repositoryURL, ["config", "user.email", "test@example.com"])
+        func commit(_ name: String) throws {
+            try "\(name)\n".write(to: repositoryURL.appendingPathComponent("\(name).txt"), atomically: true, encoding: .utf8)
+            try runGit(in: repositoryURL, ["add", "\(name).txt"])
+            try runGit(in: repositoryURL, ["commit", "-m", name])
+        }
+        try commit("start")
+        try runGit(in: repositoryURL, ["remote", "add", "origin", originURL.path])
+        try runGit(in: repositoryURL, ["push", "-u", "origin", "main"])
+        try runGit(in: repositoryURL, ["remote", "set-head", "origin", "main"])
+        try runGit(in: repositoryURL, ["switch", "-c", "dev"])
+        for number in 1...20 {
+            try commit("rewrite-\(number)")
+        }
+        try runGit(in: repositoryURL, ["push", "-u", "origin", "dev"])
+        try runGit(in: repositoryURL, ["switch", "-c", "spike"])
+        try commit("spike")
+        try runGit(in: repositoryURL, ["push", "-u", "origin", "spike"])
+        try runGit(in: repositoryURL, ["switch", "main"])
+        for number in 1...3 {
+            try commit("change-\(number)")
+        }
+        try runGit(in: repositoryURL, ["push", "origin", "main"])
+        for name in ["x1", "x2", "x3"] {
+            try runGit(in: repositoryURL, ["switch", "-c", name, "main"])
+            try commit(name)
+            try runGit(in: repositoryURL, ["push", "-u", "origin", name])
+        }
+        try runGit(in: repositoryURL, ["switch", "main"])
+        try runGit(in: repositoryURL, ["branch", "-D", "dev"])
+
+        let snapshot = try RepositoryInspector().inspect(repositoryAt: repositoryURL)
+        try expectEqual(snapshot.baseBranch, "main", "most work was started from main")
+        try expectEqual(snapshot.branches.first { $0.name == "x1" }?.unmergedCommits, 1, "a feature holds its own commit")
+    }
+
+    /// Features land in develop. A hotfix goes straight into main, and develop takes it in later: until then
+    /// the hotfix is done all the same.
+    static func testHotfixMergedIntoTheDefaultBranchIsDone() throws {
+        let rootURL = scratchURL()
+        let originURL = rootURL.appendingPathComponent("origin.git")
+        let repositoryURL = rootURL.appendingPathComponent("repository")
+        try FileManager.default.createDirectory(at: repositoryURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        try runGit(in: rootURL, ["init", "--bare", "-b", "main", originURL.path])
+        try runGit(in: repositoryURL, ["init", "-b", "main"])
+        try runGit(in: repositoryURL, ["config", "user.name", "Test User"])
+        try runGit(in: repositoryURL, ["config", "user.email", "test@example.com"])
+        func commit(_ name: String) throws {
+            try "\(name)\n".write(to: repositoryURL.appendingPathComponent("\(name).txt"), atomically: true, encoding: .utf8)
+            try runGit(in: repositoryURL, ["add", "\(name).txt"])
+            try runGit(in: repositoryURL, ["commit", "-m", name])
+        }
+        try commit("start")
+        try runGit(in: repositoryURL, ["remote", "add", "origin", originURL.path])
+        try runGit(in: repositoryURL, ["push", "-u", "origin", "main"])
+        try runGit(in: repositoryURL, ["remote", "set-head", "origin", "main"])
+        try runGit(in: repositoryURL, ["switch", "-c", "develop"])
+        try commit("develop-1")
+        try commit("develop-2")
+        try runGit(in: repositoryURL, ["push", "-u", "origin", "develop"])
+        try runGit(in: repositoryURL, ["switch", "-c", "feature"])
+        try commit("feature")
+        try runGit(in: repositoryURL, ["push", "-u", "origin", "feature"])
+        try runGit(in: repositoryURL, ["switch", "-c", "hotfix", "main"])
+        try commit("hotfix")
+        try runGit(in: repositoryURL, ["push", "-u", "origin", "hotfix"])
+        try runGit(in: repositoryURL, ["switch", "main"])
+        try runGit(in: repositoryURL, ["merge", "--no-ff", "hotfix", "-m", "Merge hotfix"])
+        try runGit(in: repositoryURL, ["push", "origin", "main"])
+
+        let snapshot = try RepositoryInspector().inspect(repositoryAt: repositoryURL)
+        try expectEqual(snapshot.baseBranch, "develop", "features land in develop")
+        try expectEqual(snapshot.branches.first { $0.name == "hotfix" }?.unmergedCommits, 0, "a hotfix in main is done")
+        try expectEqual(snapshot.unfinishedBranches.map(\.name), ["feature"], "the feature is not in develop yet")
     }
 
     private static func scratchURL() -> URL {
