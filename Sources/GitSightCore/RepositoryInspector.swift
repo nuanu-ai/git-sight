@@ -14,9 +14,9 @@ public struct RepositoryInspector {
         // git remote also finds remotes in the files of git's first years; only an empty config needs it to look.
         let hasRemote = try !config.remotes.isEmpty
             || !git.output(in: repositoryURL, ["remote"]).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        let branches = try branches(
+        let (branches, base) = try branches(
             refs.branches, in: repositoryURL, hasRemote: hasRemote,
-            checkedOut: Set(worktreeEntries.compactMap(\.branch)), base: refs.base
+            checkedOut: Set(worktreeEntries.compactMap(\.branch)), lines: refs.lines
         )
         let worktrees = try worktrees(worktreeEntries, in: repositoryURL, branches: branches, mainFilters: config.filtersOff)
         // A bare repository has no worktree of its own; its HEAD still names a branch.
@@ -28,7 +28,7 @@ public struct RepositoryInspector {
         let lastActivity = worktrees.compactMap(\.lastActivity).max()
         let assessment = RepositoryScore.evaluate(
             hasRemote: hasRemote,
-            hasBase: refs.base != nil,
+            hasBase: base != nil,
             worktrees: worktrees,
             branches: branches,
             stashes: stashes
@@ -47,7 +47,7 @@ public struct RepositoryInspector {
             remoteWebURL: config.origin.flatMap(webURL(from:)),
             lastActivity: lastActivity,
             hasRemote: hasRemote,
-            baseBranch: refs.base?.name,
+            baseBranch: base?.name,
             oldestUnsavedWork: assessment.oldestUnsavedWork,
             severity: assessment.severity
         )
@@ -489,9 +489,11 @@ public struct RepositoryInspector {
     /// Local branches, the branch work is merged into, whether there is a stash, and the branch HEAD names,
     /// from one for-each-ref. Each branch reads: name, commit, symref, HEAD mark, upstream, date, track,
     /// upstream's full name.
-    private func refs(in repositoryURL: URL) throws -> (branches: [[String]], base: Base?, hasStash: Bool, head: (name: String, commit: String)?) {
+    private func refs(in repositoryURL: URL) throws -> (branches: [[String]], lines: [Base], hasStash: Bool, head: (name: String, commit: String)?) {
         // Of remote branches only those a base can be: a repository may hold thousands.
-        let remoteRefs = ["upstream", "origin"].flatMap { remote in ["HEAD", "main", "master"].map { "refs/remotes/\(remote)/\($0)" } }
+        let remoteRefs = ["upstream", "origin"].flatMap { remote in
+            (["HEAD", "main", "master"] + Self.integrationNames).map { "refs/remotes/\(remote)/\($0)" }
+        }
         let format = "%(refname)%1F%(objectname)%1F%(symref)%1F%(HEAD)%1F%(upstream:short)%1F%(committerdate:iso-strict)%1F%(upstream:track)%1F%(upstream)%1E"
         let output = try git.output(in: repositoryURL, ["for-each-ref", "--sort=refname", "--format=\(format)", "refs/heads", "refs/stash"] + remoteRefs)
         let records = try Self.records(output).map { record in
@@ -509,15 +511,23 @@ public struct RepositoryInspector {
             bases += ["main", "master"].compactMap { listed["refs/remotes/\(remote)/\($0)"].map { ($0[0], $0[1]) } }
         }
         bases += ["main", "master"].compactMap { listed["refs/heads/\($0)"].map { ($0[0], $0[1]) } }
-        let base = bases.first.map { base in
+        // Pull requests may land in an integration branch on the same server, which the default branch takes at a release.
+        if let base = bases.first, let remote = ["upstream", "origin"].first(where: { base.ref.hasPrefix("refs/remotes/\($0)/") }) {
+            bases = [base] + Self.integrationNames.compactMap { listed["refs/remotes/\(remote)/\($0)"].map { ($0[0], $0[1]) } }
+        } else {
+            bases = Array(bases.prefix(1))
+        }
+        let lines = bases.map { base in
             // refs/heads/<name> or refs/remotes/<remote>/<name>; the name may have slashes of its own.
             let parts = base.ref.split(separator: "/", maxSplits: base.ref.hasPrefix("refs/heads/") ? 2 : 3)
             return Base(ref: base.ref, name: String(parts[parts.count - 1]), commit: base.commit)
         }
         let branches = records.filter { $0[0].hasPrefix("refs/heads/") }
         let head = branches.first { $0[3] == "*" }.map { (name: String($0[0].dropFirst("refs/heads/".count)), commit: $0[1]) }
-        return (branches, base, listed["refs/stash"] != nil, head)
+        return (branches, lines, listed["refs/stash"] != nil, head)
     }
+
+    private static let integrationNames = ["develop", "dev", "staging"]
 
     private struct Base {
         let ref: String
@@ -526,21 +536,33 @@ public struct RepositoryInspector {
     }
 
     private func branches(
-        _ records: [[String]], in repositoryURL: URL, hasRemote: Bool, checkedOut: Set<String>, base: Base?
-    ) throws -> [BranchSnapshot] {
+        _ records: [[String]], in repositoryURL: URL, hasRemote: Bool, checkedOut: Set<String>, lines: [Base]
+    ) throws -> (branches: [BranchSnapshot], base: Base?) {
         // A branch level with or behind its upstream on a remote has no commits only here.
         let synced = records.map { $0[7].hasPrefix("refs/remotes/") && $0[6] != "[gone]" && !$0[6].contains("ahead") }
         let unpushed = hasRemote && synced.contains(false) ? try unpushedCounts(in: repositoryURL) : nil
         let unpushedCounts = try zip(records, synced).map { fields, synced in
             synced ? 0 : try unpushed?(fields[1]) ?? Self.count(git.output(in: repositoryURL, ["rev-list", "--count", fields[0], "--not", "--remotes"]))
         }
-        // The local branch of the base's name is the base itself. Not every branch tracking it is:
+        // The local branch of a line's name is that line itself, not work. Not every branch tracking it is:
         // one started from origin/main tracks origin/main too.
-        let isBase = records.map { fields in base.map { fields[0] == "refs/heads/\($0.name)" } ?? false }
+        let isBase = records.map { fields in lines.contains { fields[0] == "refs/heads/\($0.name)" } }
         // Work on no remote is counted as such; only work the server has is checked against the base.
         let checked = records.indices.map { !isBase[$0] && unpushedCounts[$0] == 0 }
+        var base = lines.first
+        var ahead = try checked.contains(true) ? base.flatMap { try commitsAhead(of: $0.ref, in: repositoryURL) } : nil
+        // The base is the line the branches here hold the fewest commits beyond: the one their work lands in.
+        // An older git cannot count them in one pass, and keeps the default branch.
+        if var fewest = ahead {
+            let total = { (counts: [String: Int]) in records.indices.reduce(0) { $0 + (checked[$1] ? counts[records[$1][0]] ?? 0 : 0) } }
+            for line in lines.dropFirst() {
+                if let counts = try commitsAhead(of: line.ref, in: repositoryURL), total(counts) < total(fewest) {
+                    (base, fewest) = (line, counts)
+                }
+            }
+            ahead = fewest
+        }
         let candidates = checked.contains(true) ? base : nil
-        let ahead = try candidates.flatMap { try commitsAhead(of: $0.ref, in: repositoryURL) }
         // An older git lists the branches the base lacks anything of, and those get their commits counted one by one.
         let notMerged = try candidates.flatMap { base in
             ahead != nil ? nil : Set(try git.output(in: repositoryURL, ["for-each-ref", "--no-merged=\(base.ref)", "--format=%(refname)", "refs/heads"])
@@ -559,7 +581,7 @@ public struct RepositoryInspector {
         let merges = try base.map { base in
             try self.merges(of: counted.filter { $0.unmerged > 0 }.map { (ref: $0.fields[0], commit: $0.fields[1]) }, into: base, in: repositoryURL)
         } ?? [:]
-        return counted.map { branch in
+        return (counted.map { branch in
             let fields = branch.fields
             return BranchSnapshot(
                 name: branch.name,
@@ -574,7 +596,7 @@ public struct RepositoryInspector {
                 unmergedCommits: merges[fields[0]] == .squashed ? 0 : branch.unmerged,
                 isUnrelated: merges[fields[0]] == .unrelated
             )
-        }
+        }, base)
     }
 
     /// For each branch, the commits it holds that no remote branch does: one list of every such commit with
