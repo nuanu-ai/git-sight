@@ -42,8 +42,10 @@ struct RepositoryGraph: View {
     /// 24 pt rows and 12 pt lanes at the standard text size, growing with it.
     private var rowHeight: CGFloat { (textSize * 1.6).rounded() }
     private var laneSpacing: CGFloat { (textSize * 0.8).rounded() }
-    /// Radius of the turn where a line leaves or joins a row.
-    private static let turn: CGFloat = 5
+    /// Radius of the turn where a line leaves or joins a row: a quarter circle a lane wide, as in VS Code.
+    private var turn: CGFloat { min(laneSpacing, rowHeight / 2) }
+    /// Lines are thin, as in VS Code; the dots carry the weight.
+    private static let lineWidth: CGFloat = 1
     /// Line colors with a little gray in them, so they tell lines apart without glaring;
     /// orange and red stay with the verdicts. The first is the current branch's.
     static let laneColors: [Color] = [
@@ -371,53 +373,66 @@ struct RepositoryGraph: View {
                     layer.fill(Path(edge), with: .color(.orange))
                 }
             }
-            for commit in commits {
-                guard let row = layout.commitRow[commit.fullHash] else { continue }
-                let start = CGPoint(x: laneX(commit.lane), y: y(row))
-                for (offset, parentHash) in commit.parents.enumerated() {
-                    // The core holds this lane for the parent until the parent's row, so nothing else sits on it.
-                    let lane = offset < commit.parentLanes.count ? commit.parentLanes[offset] : commit.lane
-                    let parent = layout.commitIndex[parentHash].flatMap { index in
-                        layout.commitRow[parentHash].map { CGPoint(x: laneX(commits[index].lane), y: y($0)) }
+            // Lines go on a layer of their own, with the nodes cut out of it, so no line shows through a ring.
+            context.drawLayer { context in
+                for commit in commits {
+                    guard let row = layout.commitRow[commit.fullHash] else { continue }
+                    let start = CGPoint(x: laneX(commit.lane), y: y(row))
+                    for (offset, parentHash) in commit.parents.enumerated() {
+                        // The core holds this lane for the parent until the parent's row, so nothing else sits on it.
+                        let lane = offset < commit.parentLanes.count ? commit.parentLanes[offset] : commit.lane
+                        let parent = layout.commitIndex[parentHash].flatMap { index in
+                            layout.commitRow[parentHash].map { CGPoint(x: laneX(commits[index].lane), y: y($0)) }
+                        }
+                        let path = edge(from: start, along: laneX(lane), to: parent, bottom: size.height)
+                        // A line down the child's lane is the child's; one out to the parent's lane is the parent's.
+                        let owner = lane == commit.lane ? commit.fullHash : parentHash
+                        context.stroke(path, with: .color(layout.colors[owner] ?? layout.colors[commit.fullHash] ?? Self.baseColor), lineWidth: Self.lineWidth)
                     }
-                    let path = Self.edge(from: start, along: laneX(lane), to: parent, bottom: size.height)
-                    // A line down the child's lane is the child's; one out to the parent's lane is the parent's.
-                    let owner = lane == commit.lane ? commit.fullHash : parentHash
-                    context.stroke(path, with: .color(layout.colors[owner] ?? layout.colors[commit.fullHash] ?? Self.baseColor), lineWidth: 1.5)
+                }
+                for (index, extra) in extras.enumerated() {
+                    guard let row = layout.extraRow[index], let lane = layout.extraLane[index],
+                          let anchorRow = layout.commitRow[extra.anchor],
+                          let anchor = layout.commitIndex[extra.anchor].map({ commits[$0] }) else { continue }
+                    // One color for everything on a commit, its lane's; the node's shape tells files from a stash.
+                    let color = layout.colors[anchor.fullHash] ?? Self.baseColor
+                    let center = CGPoint(x: laneX(lane), y: y(row))
+                    // Drawn out from the commit, so where two lines share the way in, their dashes fall on the same spots.
+                    let commit = CGPoint(x: laneX(anchor.lane), y: y(anchorRow))
+                    var path = Path()
+                    path.move(to: commit)
+                    path.addArc(tangent1End: CGPoint(x: center.x, y: commit.y), tangent2End: center, radius: turn)
+                    path.addLine(to: center)
+                    context.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: Self.lineWidth, dash: [3, 3]))
+                }
+                context.blendMode = .destinationOut
+                for (index, extra) in extras.enumerated() {
+                    guard let row = layout.extraRow[index], let lane = layout.extraLane[index] else { continue }
+                    context.fill(Self.extraNode(extra.kind, at: CGPoint(x: laneX(lane), y: y(row))), with: .color(.black))
+                }
+                for commit in commits where commit.parents.count > 1 || Self.isHead(commit) {
+                    guard let row = layout.commitRow[commit.fullHash] else { continue }
+                    context.fill(Self.circle(CGPoint(x: laneX(commit.lane), y: y(row)), 6), with: .color(.black))
                 }
             }
             for (index, extra) in extras.enumerated() {
                 guard let row = layout.extraRow[index], let lane = layout.extraLane[index],
-                      let anchorRow = layout.commitRow[extra.anchor],
                       let anchor = layout.commitIndex[extra.anchor].map({ commits[$0] }) else { continue }
-                // One color for everything on a commit, its lane's; the node's shape tells files from a stash.
+                let node = Self.extraNode(extra.kind, at: CGPoint(x: laneX(lane), y: y(row)))
                 let color = layout.colors[anchor.fullHash] ?? Self.baseColor
-                let center = CGPoint(x: laneX(lane), y: y(row))
-                // Drawn out from the commit, so where two lines share the way in, their dashes fall on the same spots.
-                let commit = CGPoint(x: laneX(anchor.lane), y: y(anchorRow))
-                var path = Path()
-                path.move(to: commit)
-                path.addLine(to: CGPoint(x: center.x - Self.turn, y: commit.y))
-                path.addQuadCurve(to: CGPoint(x: center.x, y: commit.y - Self.turn), control: CGPoint(x: center.x, y: commit.y))
-                path.addLine(to: center)
-                context.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: 1.5, dash: [3, 3]))
-                if extra.kind == .uncommitted {
-                    context.fill(Self.circle(center, 4.5), with: .color(Color(nsColor: .textBackgroundColor)))
-                    context.stroke(Self.circle(center, 4.5), with: .color(color), style: StrokeStyle(lineWidth: 1.5, dash: [2.5, 2]))
-                } else {
-                    let square = Path(roundedRect: CGRect(x: center.x - 4.5, y: center.y - 4.5, width: 9, height: 9), cornerRadius: 2)
-                    context.fill(square, with: .color(Color(nsColor: .textBackgroundColor)))
-                    context.stroke(square, with: .color(color), lineWidth: 1.5)
-                }
+                context.stroke(node, with: .color(color), style: StrokeStyle(lineWidth: 1.5, dash: extra.kind == .uncommitted ? [2.5, 2] : []))
             }
             for commit in commits {
                 guard let row = layout.commitRow[commit.fullHash] else { continue }
                 let center = CGPoint(x: laneX(commit.lane), y: y(row))
                 let color = layout.colors[commit.fullHash] ?? Self.baseColor
-                if commit.parents.count > 1 {
-                    // A merge: a ring with a dot, as in VS Code.
-                    context.stroke(Self.circle(center, 4.5), with: .color(color), lineWidth: 1.5)
-                    context.fill(Self.circle(center, 2), with: .color(color))
+                if Self.isHead(commit) {
+                    // The commit checked out: an open ring, as in VS Code.
+                    context.stroke(Self.circle(center, 5), with: .color(color), lineWidth: 2)
+                } else if commit.parents.count > 1 {
+                    // A merge: a ring with a dot.
+                    context.stroke(Self.circle(center, 5), with: .color(color), lineWidth: 1.5)
+                    context.fill(Self.circle(center, 2.5), with: .color(color))
                 } else {
                     context.fill(Self.circle(center, 4), with: .color(color))
                 }
@@ -427,14 +442,12 @@ struct RepositoryGraph: View {
     }
 
     /// A line from a commit to its parent: across the child's row to the held lane, down it,
-    /// and across the parent's row into the parent, turning with a small radius like VS Code.
-    private static func edge(from start: CGPoint, along x: CGFloat, to end: CGPoint?, bottom: CGFloat) -> Path {
+    /// and across the parent's row into the parent, each turn a quarter circle as in VS Code.
+    private func edge(from start: CGPoint, along x: CGFloat, to end: CGPoint?, bottom: CGFloat) -> Path {
         var path = Path()
         path.move(to: start)
         if x != start.x {
-            let direction: CGFloat = x > start.x ? 1 : -1
-            path.addLine(to: CGPoint(x: x - direction * turn, y: start.y))
-            path.addQuadCurve(to: CGPoint(x: x, y: start.y + turn), control: CGPoint(x: x, y: start.y))
+            path.addArc(tangent1End: CGPoint(x: x, y: start.y), tangent2End: CGPoint(x: x, y: start.y + turn), radius: turn)
         }
         guard let end else {
             // The parent is past the history limit: the line runs off the bottom in its lane.
@@ -442,12 +455,22 @@ struct RepositoryGraph: View {
             return path
         }
         if x != end.x {
-            let direction: CGFloat = end.x > x ? 1 : -1
-            path.addLine(to: CGPoint(x: x, y: end.y - turn))
-            path.addQuadCurve(to: CGPoint(x: x + direction * turn, y: end.y), control: CGPoint(x: x, y: end.y))
+            path.addArc(tangent1End: CGPoint(x: x, y: end.y), tangent2End: end, radius: turn)
         }
         path.addLine(to: end)
         return path
+    }
+
+    /// The checked-out commit: the current branch's, or a detached HEAD's.
+    private static func isHead(_ commit: CommitSnapshot) -> Bool {
+        commit.refs.contains { $0.kind == .head || ($0.kind == .branch && $0.isHead) }
+    }
+
+    /// Uncommitted files are a dashed circle; a stash is a square.
+    private static func extraNode(_ kind: GraphExtra.Kind, at center: CGPoint) -> Path {
+        kind == .uncommitted
+            ? circle(center, 4.5)
+            : Path(roundedRect: CGRect(x: center.x - 4.5, y: center.y - 4.5, width: 9, height: 9), cornerRadius: 2)
     }
 
     private static func circle(_ center: CGPoint, _ radius: CGFloat) -> Path {
