@@ -20,7 +20,7 @@ struct RepositoryGraph: View {
     let extras: [GraphExtra]
     /// Worktree folders by the commit their branch is at, shown as labels next to the branch.
     let folders: [String: [String]]
-    /// The base's full ref; its line is drawn gray.
+    /// The base's full ref; its line is drawn orange, as VS Code draws the base.
     let baseRef: String?
     /// Rows of the selected worktree or branch.
     let highlighted: Set<GraphRowID>
@@ -50,7 +50,7 @@ struct RepositoryGraph: View {
     private static let lineWidth: CGFloat = 1
     /// Branch label colors with a little gray in them, so labels read without glaring. The hues are VS Code's graph
     /// palette, made to tell apart with color blindness too, in an order that never puts two alike side by side.
-    /// Orange and red stay with the verdicts, so VS Code's amber is a gold here. The first is the current branch's.
+    /// Orange is the base's, as in VS Code, so VS Code's amber is a gold here. The first is the current branch's.
     static let laneColors: [Color] = [
         Color(red: 0.24, green: 0.5, blue: 0.82),
         Color(red: 0.78, green: 0.22, blue: 0.49),
@@ -69,19 +69,19 @@ struct RepositoryGraph: View {
         Color(red: 0.45, green: 0.76, blue: 0.27)
     ]
 
-    /// A line's color: the base's gray, or one from the palettes above.
+    /// A line's color: the base's orange, or one from the palettes above.
     private enum Hue: Hashable {
         case base
         case palette(Int)
 
         var line: Color {
             if case .palette(let index) = self { return RepositoryGraph.lineColors[index] }
-            return Color(white: 0.55)
+            return Color(red: 0.92, green: 0.38, blue: 0.05)
         }
 
         var label: Color {
             if case .palette(let index) = self { return RepositoryGraph.laneColors[index] }
-            return .gray
+            return Color(red: 0.78, green: 0.38, blue: 0.12)
         }
     }
 
@@ -188,7 +188,7 @@ struct RepositoryGraph: View {
     }
 
     /// Lanes and colors as VS Code has them. The current branch is blue down to where it meets the base, and the
-    /// base's line and everything down its first parents are gray, so work that is not in the base stands out.
+    /// base's line and everything down its first parents are orange, as VS Code colors the base.
     /// Every other line takes the next color where it starts, at a branch tip or where a branch was merged.
     private func graph() -> [GraphRow<Hue>] {
         let index = Dictionary(commits.enumerated().map { ($0.element.fullHash, $0.offset) }) { first, _ in first }
