@@ -544,24 +544,29 @@ public struct RepositoryInspector {
         let unpushedCounts = try zip(records, synced).map { fields, synced in
             synced ? 0 : try unpushed?(fields[1]) ?? Self.count(git.output(in: repositoryURL, ["rev-list", "--count", fields[0], "--not", "--remotes"]))
         }
-        // The local branch of a line's name is that line itself, not work. Not every branch tracking it is:
-        // one started from origin/main tracks origin/main too.
-        let isBase = records.map { fields in lines.contains { fields[0] == "refs/heads/\($0.name)" } }
+        // Branches named like a line take no part in choosing the base: one of them may be that line.
+        let named = records.map { fields in lines.contains { fields[0] == "refs/heads/\($0.name)" } }
+        let voters = records.indices.filter { !named[$0] && unpushedCounts[$0] == 0 }.map { records[$0][0] }
+        var base = lines.first
+        var ahead = try unpushedCounts.contains(0) ? base.flatMap { try commitsAhead(of: $0.ref, in: repositoryURL) } : nil
+        // Pull requests may land in another line, which the default branch takes at a release. Branches started
+        // from it hold its commits, so those it does not hold yet have fewer commits beyond it than beyond the
+        // default branch. A line that only tries work out, taking main and features for QA, started none of them.
+        // An older git cannot count them in one pass, and keeps the default branch.
+        if let byDefault = ahead, let first = lines.first, !voters.isEmpty {
+            var widest = 0
+            var seen: Set<String> = [first.commit]
+            for line in lines.dropFirst() where seen.insert(line.commit).inserted {
+                guard let counts = try commitsAhead(of: line.ref, in: repositoryURL) else { break }
+                let margin = voters.filter { (counts[$0] ?? 0) > 0 }.reduce(0) { $0 + (byDefault[$1] ?? 0) - (counts[$1] ?? 0) }
+                if margin > widest { (base, ahead, widest) = (line, counts, margin) }
+            }
+        }
+        // The local branch of the base's name is the base itself, and the default branch's is the release line.
+        // Not every branch tracking them is: one started from origin/main tracks origin/main too.
+        let isBase = records.map { fields in [lines.first, base].contains { $0.map { fields[0] == "refs/heads/\($0.name)" } ?? false } }
         // Work on no remote is counted as such; only work the server has is checked against the base.
         let checked = records.indices.map { !isBase[$0] && unpushedCounts[$0] == 0 }
-        var base = lines.first
-        var ahead = try checked.contains(true) ? base.flatMap { try commitsAhead(of: $0.ref, in: repositoryURL) } : nil
-        // The base is the line the branches here hold the fewest commits beyond: the one their work lands in.
-        // An older git cannot count them in one pass, and keeps the default branch.
-        if var fewest = ahead {
-            let total = { (counts: [String: Int]) in records.indices.reduce(0) { $0 + (checked[$1] ? counts[records[$1][0]] ?? 0 : 0) } }
-            for line in lines.dropFirst() {
-                if let counts = try commitsAhead(of: line.ref, in: repositoryURL), total(counts) < total(fewest) {
-                    (base, fewest) = (line, counts)
-                }
-            }
-            ahead = fewest
-        }
         let candidates = checked.contains(true) ? base : nil
         // An older git lists the branches the base lacks anything of, and those get their commits counted one by one.
         let notMerged = try candidates.flatMap { base in
