@@ -261,6 +261,8 @@ public struct RepositorySnapshot: Equatable {
     public let hasRemote: Bool
     /// The branch work is merged into, e.g. "main"; nil when the repository has none to tell.
     public let baseBranch: String?
+    /// The base's full ref, e.g. "refs/remotes/origin/staging", or "refs/heads/main" without a server.
+    public let baseRef: String?
     /// Date of the oldest work that exists only on this machine.
     public let oldestUnsavedWork: Date?
     public let severity: Severity
@@ -279,6 +281,7 @@ public struct RepositorySnapshot: Equatable {
         lastActivity: Date? = nil,
         hasRemote: Bool = true,
         baseBranch: String? = nil,
+        baseRef: String? = nil,
         oldestUnsavedWork: Date? = nil,
         severity: Severity = .clean
     ) {
@@ -295,6 +298,7 @@ public struct RepositorySnapshot: Equatable {
         self.lastActivity = lastActivity
         self.hasRemote = hasRemote
         self.baseBranch = baseBranch
+        self.baseRef = baseRef
         self.oldestUnsavedWork = oldestUnsavedWork
         self.severity = severity
     }

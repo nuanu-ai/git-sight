@@ -465,7 +465,8 @@ final class WorkspaceModel {
         guard let path = selectedPath else { return }
         let base = selectedRepository.map { repository in
             // On the server if it is there, as the graph's highlight takes it; the base's own line keeps its unpushed commits.
-            ["--not", "--remotes=*/\(repository.base)"]
+            // Only the base's own ref: a pattern would also take someone's origin/alice/dev for dev.
+            ["--not"] + (repository.baseRef.flatMap { $0.hasPrefix("refs/remotes/") ? [$0] : nil } ?? [])
                 + (repository.branches.contains { $0.name == repository.base } && line?.revision != "refs/heads/\(repository.base)"
                     ? ["refs/heads/\(repository.base)"] : [])
         } ?? []

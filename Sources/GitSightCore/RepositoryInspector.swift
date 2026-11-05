@@ -48,6 +48,7 @@ public struct RepositoryInspector {
             lastActivity: lastActivity,
             hasRemote: hasRemote,
             baseBranch: base?.name,
+            baseRef: base?.ref,
             oldestUnsavedWork: assessment.oldestUnsavedWork,
             severity: assessment.severity
         )

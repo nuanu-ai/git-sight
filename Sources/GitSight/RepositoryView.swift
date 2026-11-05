@@ -587,7 +587,7 @@ private struct GraphPane: View {
         }
         // What the base already has, on the server if it is there, so the base's own unpushed commits still count.
         let baseRefs = commits.filter { commit in
-            commit.refs.contains { $0.kind == .remoteBranch && $0.name.hasSuffix("/\(repository.base)") }
+            commit.refs.contains { $0.kind == .remoteBranch && "refs/remotes/\($0.name)" == repository.baseRef }
         }
         let baseTips = baseRefs.isEmpty
             ? commits.filter { $0.refs.contains { $0.kind == .branch && $0.name == repository.base } }
