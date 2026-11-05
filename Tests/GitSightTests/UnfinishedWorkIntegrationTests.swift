@@ -420,6 +420,85 @@ enum UnfinishedWorkIntegrationTests {
         try expectEqual(snapshot.branches.first { $0.name == "feature" }?.unmergedCommits, 1, "the branch holds its own commit")
     }
 
+    /// A branch someone named dev holds work main never got. Its name does not make it a line work lands in.
+    static func testBranchNamedLikeALineStillHoldsWork() throws {
+        let rootURL = scratchURL()
+        let originURL = rootURL.appendingPathComponent("origin.git")
+        let repositoryURL = rootURL.appendingPathComponent("repository")
+        try FileManager.default.createDirectory(at: repositoryURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        try runGit(in: rootURL, ["init", "--bare", "-b", "main", originURL.path])
+        try runGit(in: repositoryURL, ["init", "-b", "main"])
+        try runGit(in: repositoryURL, ["config", "user.name", "Test User"])
+        try runGit(in: repositoryURL, ["config", "user.email", "test@example.com"])
+        func commit(_ name: String) throws {
+            try "\(name)\n".write(to: repositoryURL.appendingPathComponent("\(name).txt"), atomically: true, encoding: .utf8)
+            try runGit(in: repositoryURL, ["add", "\(name).txt"])
+            try runGit(in: repositoryURL, ["commit", "-m", name])
+        }
+        try commit("start")
+        try runGit(in: repositoryURL, ["remote", "add", "origin", originURL.path])
+        try runGit(in: repositoryURL, ["push", "-u", "origin", "main"])
+        try runGit(in: repositoryURL, ["remote", "set-head", "origin", "main"])
+        try runGit(in: repositoryURL, ["switch", "-c", "dev"])
+        for number in 1...3 {
+            try commit("experiment-\(number)")
+        }
+        try runGit(in: repositoryURL, ["push", "-u", "origin", "dev"])
+        try runGit(in: repositoryURL, ["switch", "-c", "feature", "main"])
+        try commit("feature")
+        try runGit(in: repositoryURL, ["push", "-u", "origin", "feature"])
+
+        let snapshot = try RepositoryInspector().inspect(repositoryAt: repositoryURL)
+        try expectEqual(snapshot.baseBranch, "main", "work started from main lands in main")
+        try expectEqual(snapshot.branches.first { $0.name == "dev" }?.unmergedCommits, 3, "dev holds three commits main never got")
+        try expectEqual(snapshot.unfinishedBranches.map(\.name), ["dev", "feature"], "both are unfinished")
+    }
+
+    /// Features start from main and are merged into staging for QA; staging takes main in now and then.
+    /// Only main takes work for good, so a feature merged for QA alone is still unfinished.
+    static func testStagingForQAIsNotTheBase() throws {
+        let rootURL = scratchURL()
+        let originURL = rootURL.appendingPathComponent("origin.git")
+        let repositoryURL = rootURL.appendingPathComponent("repository")
+        try FileManager.default.createDirectory(at: repositoryURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        try runGit(in: rootURL, ["init", "--bare", "-b", "main", originURL.path])
+        try runGit(in: repositoryURL, ["init", "-b", "main"])
+        try runGit(in: repositoryURL, ["config", "user.name", "Test User"])
+        try runGit(in: repositoryURL, ["config", "user.email", "test@example.com"])
+        func commit(_ name: String) throws {
+            try "\(name)\n".write(to: repositoryURL.appendingPathComponent("\(name).txt"), atomically: true, encoding: .utf8)
+            try runGit(in: repositoryURL, ["add", "\(name).txt"])
+            try runGit(in: repositoryURL, ["commit", "-m", name])
+        }
+        try commit("start")
+        try runGit(in: repositoryURL, ["remote", "add", "origin", originURL.path])
+        try runGit(in: repositoryURL, ["push", "-u", "origin", "main"])
+        try runGit(in: repositoryURL, ["remote", "set-head", "origin", "main"])
+        try runGit(in: repositoryURL, ["branch", "staging"])
+        for name in ["checkout", "search"] {
+            try runGit(in: repositoryURL, ["switch", "-c", name, "main"])
+            try commit("\(name)-one")
+            try commit("\(name)-two")
+            try runGit(in: repositoryURL, ["push", "-u", "origin", name])
+        }
+        try runGit(in: repositoryURL, ["switch", "main"])
+        try commit("hotfix")
+        try runGit(in: repositoryURL, ["push", "origin", "main"])
+        try runGit(in: repositoryURL, ["switch", "staging"])
+        try runGit(in: repositoryURL, ["merge", "--no-ff", "main", "-m", "Merge main"])
+        try runGit(in: repositoryURL, ["merge", "--no-ff", "checkout", "-m", "Merge checkout for QA"])
+        try runGit(in: repositoryURL, ["push", "origin", "staging"])
+        try runGit(in: repositoryURL, ["switch", "main"])
+        try runGit(in: repositoryURL, ["branch", "-D", "staging"])
+
+        let snapshot = try RepositoryInspector().inspect(repositoryAt: repositoryURL)
+        try expectEqual(snapshot.baseBranch, "main", "staging only tries work out")
+        try expectEqual(snapshot.branches.first { $0.name == "checkout" }?.unmergedCommits, 2, "a feature merged for QA alone is not in main")
+        try expectEqual(snapshot.unfinishedBranches.map(\.name), ["checkout", "search"], "both features are unfinished")
+    }
+
     private static func scratchURL() -> URL {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

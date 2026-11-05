@@ -133,6 +133,8 @@ enum RepositoryInspectorIntegrationTests {
             ("a branch naming no commit leaves the rest readable", UnfinishedWorkIntegrationTests.testBranchNamingNoCommitLeavesTheRestReadable),
             ("work lands in the integration branch", UnfinishedWorkIntegrationTests.testWorkLandsInTheIntegrationBranch),
             ("a stale integration branch is not the base", UnfinishedWorkIntegrationTests.testStaleIntegrationBranchIsNotTheBase),
+            ("a branch named like a line still holds work", UnfinishedWorkIntegrationTests.testBranchNamedLikeALineStillHoldsWork),
+            ("staging for QA is not the base", UnfinishedWorkIntegrationTests.testStagingForQAIsNotTheBase),
             ("diffs show what changed line by line", FileDiffIntegrationTests.testDiffsShowWhatChangedLineByLine),
             ("random histories draw without crossings", CommitTopologyIntegrationTests.testRandomHistoriesDrawWithoutCrossings),
             ("uncommitted and stashed files are listed", ChangedFilesIntegrationTests.testReportsUncommittedAndStashedFiles),
