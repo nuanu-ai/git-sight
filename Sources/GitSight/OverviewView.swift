@@ -7,7 +7,7 @@ struct OverviewView: View {
     @Bindable var model: WorkspaceModel
 
     var body: some View {
-        // Ages move on with every rescan, at least every five minutes; that is often enough here.
+        // The order moves on with every rescan; the ages on the rows count on every minute.
         GeometryReader { geometry in
             ScrollView {
                 content(now: Date(), columns: OverviewColumns(width: geometry.size.width))
@@ -247,12 +247,16 @@ private struct OverviewRow: View {
                     .padding(.horizontal, 8)
                     .frame(width: columns.kind, alignment: .leading)
             }
-            Text(RepositoryText.age(lead?.date, now: now))
-                .monospacedDigit()
-                .fontWeight(lead?.verdict(now: now) == .forgotten ? .semibold : .regular)
-                .foregroundStyle(lead.map { $0.verdict(now: now).textColor } ?? .secondary)
-                .help(lead?.verdict(now: now).title ?? "")
-                .padding(.horizontal, 8)
+            // The age counts on between rescans, and its color with it.
+            TimelineView(.everyMinute) { _ in
+                let now = Date()
+                Text(RepositoryText.age(lead?.date, now: now))
+                    .monospacedDigit()
+                    .fontWeight(lead?.verdict(now: now) == .forgotten ? .semibold : .regular)
+                    .foregroundStyle(lead.map { $0.verdict(now: now).textColor } ?? .secondary)
+                    .help(lead?.verdict(now: now).title ?? "")
+            }
+            .padding(.horizontal, 8)
                 .frame(width: columns.idle, alignment: .leading)
         }
         .lineLimit(1)

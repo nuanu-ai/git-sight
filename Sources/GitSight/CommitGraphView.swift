@@ -250,9 +250,7 @@ struct RepositoryGraph: View {
                 Text(extra.text)
                     .lineLimit(1)
                 Spacer(minLength: 8)
-                Text(RepositoryText.age(extra.date))
-                    .textRole(.secondary)
-                    .monospacedDigit()
+                Age(date: extra.date)
             }
             .foregroundStyle(.secondary)
             .padding(.leading, indent + 6)
@@ -440,10 +438,8 @@ private struct CommitRow: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            Text(RepositoryText.age(commit.date))
-                .textRole(.secondary)
+            Age(date: commit.date)
                 .foregroundStyle(.secondary)
-                .monospacedDigit()
         }
         .padding(.leading, 6)
         .padding(.trailing, 14)
@@ -489,6 +485,21 @@ private struct CommitRow: View {
             }
         }
         .fixedSize()
+    }
+}
+
+/// How long ago a row's commit or change was. A row is drawn once and kept while its commit is,
+/// so the age counts on by itself.
+private struct Age: View {
+    let date: Date
+
+    var body: some View {
+        // The schedule only redraws: its dates are the starts of minutes, behind the clock.
+        TimelineView(.everyMinute) { _ in
+            Text(RepositoryText.age(date))
+                .textRole(.secondary)
+                .monospacedDigit()
+        }
     }
 }
 

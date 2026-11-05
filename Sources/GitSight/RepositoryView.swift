@@ -59,7 +59,7 @@ private struct PlaceList: View {
     }
 
     var body: some View {
-        // Ages move on with every rescan, at least every five minutes; that is often enough here.
+        // The order moves on with every rescan; the ages on the rows count on every minute.
         let now = Date()
     let sections = sections(now: now)
         ScrollViewReader { proxy in
@@ -312,12 +312,16 @@ private struct PlaceRow: View {
                 }
             }
             Spacer(minLength: 8)
-            Text(RepositoryText.age(lead?.date, now: now))
-                .textRole(.secondary)
-                .monospacedDigit()
-                .fontWeight(lead?.verdict(now: now) == .forgotten ? .semibold : .regular)
-                .selectableTint(lead.map { $0.verdict(now: now).textColor } ?? .secondary)
-                .frame(height: lineHeight)
+            // The age counts on between rescans, and its color with it.
+            TimelineView(.everyMinute) { _ in
+                let now = Date()
+                Text(RepositoryText.age(lead?.date, now: now))
+                    .textRole(.secondary)
+                    .monospacedDigit()
+                    .fontWeight(lead?.verdict(now: now) == .forgotten ? .semibold : .regular)
+                    .selectableTint(lead.map { $0.verdict(now: now).textColor } ?? .secondary)
+            }
+            .frame(height: lineHeight)
         }
         .lineLimit(1)
         .padding(.horizontal, 8)
