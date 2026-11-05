@@ -138,6 +138,7 @@ enum RepositoryInspectorIntegrationTests {
             ("branches merged into the integration branch are done", UnfinishedWorkIntegrationTests.testBranchesMergedIntoTheIntegrationBranchAreDone),
             ("one branch on a far line does not move the base", UnfinishedWorkIntegrationTests.testOneBranchOnAFarLineDoesNotMoveTheBase),
             ("a hotfix merged into the default branch is done", UnfinishedWorkIntegrationTests.testHotfixMergedIntoTheDefaultBranchIsDone),
+            ("a default on develop keeps main as the release line", UnfinishedWorkIntegrationTests.testDefaultOnDevelopKeepsMainAsTheReleaseLine),
             ("diffs show what changed line by line", FileDiffIntegrationTests.testDiffsShowWhatChangedLineByLine),
             ("random histories draw without crossings", CommitTopologyIntegrationTests.testRandomHistoriesDrawWithoutCrossings),
             ("uncommitted and stashed files are listed", ChangedFilesIntegrationTests.testReportsUncommittedAndStashedFiles),
