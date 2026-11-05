@@ -42,8 +42,9 @@ enum CommitTopologyIntegrationTests {
         try expectEqual(merge?.parents.count, 2, "merge commit reports both parents")
         try expectEqual(merge?.parents[0], mainCommit?.fullHash, "first parent remains on main")
         try expectEqual(merge?.parents[1], featureCommit?.fullHash, "second parent remains on feature")
-        try expectEqual(merge?.lane, 0, "first tip starts on the first graph rail")
-        try expectEqual(mainCommit?.lane == featureCommit?.lane, false, "parallel parents occupy distinct graph rails")
+        let dots = self.dots(history)
+        try expectEqual(merge.flatMap { dots[$0.fullHash] }, 0, "first tip starts on the first graph rail")
+        try expectEqual(mainCommit.flatMap { dots[$0.fullHash] } == featureCommit.flatMap { dots[$0.fullHash] }, false, "parallel parents occupy distinct graph rails")
         try expectEqual(repeatedHistory, history, "commit rails remain stable across inspection")
         let mergeFiles = try inspector.changedFiles(in: repositoryURL, commit: merge!)
         try expectEqual(mergeFiles.map(\.path), ["feature.txt"], "expanding a merge shows changes against its first parent")
@@ -90,9 +91,60 @@ enum CommitTopologyIntegrationTests {
         let side = history.first { $0.subject == "Side work" }
         let main = history.first { $0.subject == "Main advance" }
         let base = history.first { $0.subject == "Initial" }
-        try expectEqual(side?.lane, 1, "second merge parent starts on lane 1")
-        try expectEqual(main?.lane, 0, "first merge parent remains on lane 0")
-        try expectEqual(base?.lane, main?.lane, "the shared root continues the first-parent line, and the side line joins it")
+        let dots = self.dots(history)
+        try expectEqual(side.flatMap { dots[$0.fullHash] }, 1, "second merge parent starts on lane 1")
+        try expectEqual(main.flatMap { dots[$0.fullHash] }, 0, "first merge parent remains on lane 0")
+        try expectEqual(base.flatMap { dots[$0.fullHash] }, main.flatMap { dots[$0.fullHash] }, "the shared root continues the first-parent line, and the side line joins it")
+    }
+
+    /// Two branches merged into main, A last: A's line ends at Y while B's line runs on below it to X.
+    private static func twoMergedBranches() throws -> [CommitSnapshot] {
+        let repositoryURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent(".build/GitSightTests/\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: repositoryURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: repositoryURL) }
+        try runGit(in: repositoryURL, ["init", "-b", "main"])
+        let emptyTree = try gitOutput(in: repositoryURL, ["hash-object", "-t", "tree", "/dev/null"])
+        func commit(_ subject: String, day: Int, _ parents: String...) throws -> String {
+            let date = "2026-01-0\(day)T00:00:00Z"
+            return try gitOutput(in: repositoryURL, ["commit-tree", emptyTree, "-m", subject] + parents.flatMap { ["-p", $0] }, environment: [
+                "GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "t@example.com", "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "t@example.com",
+                "GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date
+            ])
+        }
+        let r = try commit("R", day: 1)
+        let x = try commit("X", day: 2, r)
+        let y = try commit("Y", day: 3, x)
+        let b = try commit("B", day: 4, x)
+        let a = try commit("A", day: 5, y)
+        let m2 = try commit("Merge B", day: 6, y, b)
+        let m1 = try commit("Merge A", day: 7, m2, a)
+        let history = try RepositoryInspector().history(in: repositoryURL, revisions: [m1])
+        try expectEqual(history.map(\.subject), ["Merge A", "A", "Merge B", "B", "Y", "X", "R"], "fixture lists the merged branches in this order")
+        return history
+    }
+
+    static func testEndedLineLetsTheOthersMoveLeft() throws {
+        let history = try twoMergedBranches()
+        let rows = CommitGraph.rows(history, color: { _ in nil }, fresh: { 0 })
+        try expectEqual(rows.count, history.count, "every commit gets a row")
+        try expectEqual(rows[3].dot, 2, "B sits right of main and of A's line")
+        try expectEqual(rows[4].output.map(\.target), [history[5].fullHash, history[5].fullHash], "where A's line ends at Y, two lines go on to X and no gap is left")
+        try expectEqual(rows[4].next, [nil, nil, 1], "B's line moves left into the place A's line left")
+    }
+
+    static func testLinesKeepTheColorOfTheCommitThatStartedThem() throws {
+        let history = try twoMergedBranches()
+        var next = 0
+        let rows = CommitGraph.rows(history, color: { $0.subject == "Merge A" ? "head" : nil }, fresh: {
+            defer { next += 1 }
+            return "c\(next)"
+        })
+        try expectEqual(rows.map(\.color), ["head", "c0", "head", "c1", "head", "head", "head"],
+                        "main keeps its color down its first parents, and each merged branch gets a color of its own")
     }
 
     static func testHistoryEndsWhereWorkLeftTheServer() throws {
@@ -273,19 +325,29 @@ enum CommitTopologyIntegrationTests {
         try expectEqual(found, [], "lines in forty generated histories pass no other commit's dot")
     }
 
+    private static func dots(_ history: [CommitSnapshot]) -> [String: Int] {
+        let rows = CommitGraph.rows(history, color: { _ in nil }, fresh: { 0 })
+        return Dictionary(zip(history.map(\.fullHash), rows.map(\.dot))) { first, _ in first }
+    }
+
+    /// Ways a row could mislead: a parent without its line, a line running through a dot,
+    /// or a commit no line comes for sitting anywhere but right of every line, away from its subject.
     private static func crossings(in history: [CommitSnapshot]) -> [String] {
-        let rows = Dictionary(uniqueKeysWithValues: history.enumerated().map { ($0.element.fullHash, $0.offset) })
+        let rows = CommitGraph.rows(history, color: { _ in nil }, fresh: { 0 })
+        guard rows.count == history.count else { return ["\(rows.count) rows for \(history.count) commits"] }
         var crossings: [String] = []
-        for (row, commit) in history.enumerated() {
-            if commit.parentLanes.count != commit.parents.count {
-                crossings.append("\(commit.subject) has no lane for some parents")
-                continue
+        for (commit, row) in zip(history, rows) {
+            if row.parents.map({ row.output[$0].target }) != commit.parents {
+                crossings.append("\(commit.subject) has no line for some parents")
             }
-            for (parent, lane) in zip(commit.parents, commit.parentLanes) {
-                guard let parentRow = rows[parent] else { continue }
-                for between in history[(row + 1)..<parentRow] where between.lane == lane {
-                    crossings.append("\(commit.subject)→\(history[parentRow].subject) crosses \(between.subject)")
+            for (from, to) in row.next.enumerated() {
+                guard let to else { continue }
+                if (min(from, to)...max(from, to)).contains(row.dot) {
+                    crossings.append("a line passes through \(commit.subject)")
                 }
+            }
+            if !row.input.contains(where: { $0.target == commit.fullHash }), row.dot != row.input.count {
+                crossings.append("\(commit.subject) starts away from the right edge")
             }
         }
         return crossings

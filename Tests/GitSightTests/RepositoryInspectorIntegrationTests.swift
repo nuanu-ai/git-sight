@@ -141,6 +141,8 @@ enum RepositoryInspectorIntegrationTests {
             ("a default on develop keeps main as the release line", UnfinishedWorkIntegrationTests.testDefaultOnDevelopKeepsMainAsTheReleaseLine),
             ("diffs show what changed line by line", FileDiffIntegrationTests.testDiffsShowWhatChangedLineByLine),
             ("random histories draw without crossings", CommitTopologyIntegrationTests.testRandomHistoriesDrawWithoutCrossings),
+            ("a line that ends lets the lines right of it move left", CommitTopologyIntegrationTests.testEndedLineLetsTheOthersMoveLeft),
+            ("lines keep the color of the commit that started them", CommitTopologyIntegrationTests.testLinesKeepTheColorOfTheCommitThatStartedThem),
             ("uncommitted and stashed files are listed", ChangedFilesIntegrationTests.testReportsUncommittedAndStashedFiles),
             ("stash keeps its files when another is pushed", ChangedFilesIntegrationTests.testStashKeepsItsFilesWhenAnotherIsPushed),
             ("watcher reports only the repository that changed", RepositoryWatcherIntegrationTests.testReportsOnlyTheRepositoryThatChanged),
