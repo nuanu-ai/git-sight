@@ -530,6 +530,30 @@ public struct RepositoryInspector {
 
     private static let integrationNames = ["develop", "dev", "staging"]
 
+    /// The line work lands in. Pull requests may land in another line than the default branch, which takes them
+    /// at a release. A branch was started from a line when it holds the line's own first-parent commits, those
+    /// the other line lacks; a line that only tries work out takes features in as second parents and started none.
+    /// The base is the line more of the pushed branches were started from than from the default branch.
+    private func base(of lines: [Base], voters: [String], in repositoryURL: URL) throws -> Base? {
+        guard let first = lines.first, !voters.isEmpty else { return lines.first }
+        func started(from line: Base, not other: Base) throws -> Int {
+            // Holding any commit of the line's own first-parent chain means holding the oldest one.
+            let chain = try git.output(in: repositoryURL, ["rev-list", "--first-parent", "--reverse", line.ref, "--not", other.ref, "--"])
+            guard let oldest = chain.split(separator: "\n").first else { return 0 }
+            let holders = Set(try git.output(in: repositoryURL, ["for-each-ref", "--contains=\(oldest)", "--format=%(refname)", "refs/heads"])
+                .split(separator: "\n").map(String.init))
+            return voters.count(where: holders.contains)
+        }
+        var base = first
+        var most = 0
+        var seen: Set<String> = [first.commit]
+        for line in lines.dropFirst() where seen.insert(line.commit).inserted {
+            let votes = try started(from: line, not: first)
+            if votes > most, try votes > started(from: first, not: line) { (base, most) = (line, votes) }
+        }
+        return base
+    }
+
     private struct Base {
         let ref: String
         let name: String
@@ -548,27 +572,21 @@ public struct RepositoryInspector {
         // Branches named like a line take no part in choosing the base: one of them may be that line.
         let named = records.map { fields in lines.contains { fields[0] == "refs/heads/\($0.name)" } }
         let voters = records.indices.filter { !named[$0] && unpushedCounts[$0] == 0 }.map { records[$0][0] }
-        var base = lines.first
-        var ahead = try unpushedCounts.contains(0) ? base.flatMap { try commitsAhead(of: $0.ref, in: repositoryURL) } : nil
-        // Pull requests may land in another line, which the default branch takes at a release. Branches started
-        // from it hold its commits, so those it does not hold yet have fewer commits beyond it than beyond the
-        // default branch. A line that only tries work out, taking main and features for QA, started none of them.
-        // An older git cannot count them in one pass, and keeps the default branch.
-        if let byDefault = ahead, let first = lines.first, !voters.isEmpty {
-            var widest = 0
-            var seen: Set<String> = [first.commit]
-            for line in lines.dropFirst() where seen.insert(line.commit).inserted {
-                guard let counts = try commitsAhead(of: line.ref, in: repositoryURL) else { break }
-                let margin = voters.filter { (counts[$0] ?? 0) > 0 }.reduce(0) { $0 + (byDefault[$1] ?? 0) - (counts[$1] ?? 0) }
-                if margin > widest { (base, ahead, widest) = (line, counts, margin) }
-            }
-        }
+        let base = try self.base(of: lines, voters: voters, in: repositoryURL)
         // The local branch of the base's name is the base itself, and the default branch's is the release line.
         // Not every branch tracking them is: one started from origin/main tracks origin/main too.
         let isBase = records.map { fields in [lines.first, base].contains { $0.map { fields[0] == "refs/heads/\($0.name)" } ?? false } }
         // Work on no remote is counted as such; only work the server has is checked against the base.
         let checked = records.indices.map { !isBase[$0] && unpushedCounts[$0] == 0 }
         let candidates = checked.contains(true) ? base : nil
+        let ahead = try candidates.flatMap { try commitsAhead(of: $0.ref, in: repositoryURL) }
+        // Work the default branch took is done, though the base may not have it yet: a hotfix before develop takes it in.
+        let landed = try candidates.flatMap { base in
+            try lines.first.flatMap { first in
+                first.ref == base.ref ? nil : Set(try git.output(in: repositoryURL, ["for-each-ref", "--merged=\(first.ref)", "--format=%(refname)", "refs/heads"])
+                    .split(separator: "\n").map(String.init))
+            }
+        } ?? []
         // An older git lists the branches the base lacks anything of, and those get their commits counted one by one.
         let notMerged = try candidates.flatMap { base in
             ahead != nil ? nil : Set(try git.output(in: repositoryURL, ["for-each-ref", "--no-merged=\(base.ref)", "--format=%(refname)", "refs/heads"])
@@ -578,7 +596,7 @@ public struct RepositoryInspector {
             let fields = records[index]
             let ref = fields[0]
             var unmerged = 0
-            if let base, checked[index] {
+            if let base, checked[index], !landed.contains(ref) {
                 unmerged = try ahead.map { $0[ref] ?? 0 }
                     ?? (notMerged.contains(ref) ? Self.count(git.output(in: repositoryURL, ["rev-list", "--count", ref, "--not", base.ref, "--"])) : 0)
             }
