@@ -513,8 +513,11 @@ public struct RepositoryInspector {
         }
         bases += ["main", "master"].compactMap { listed["refs/heads/\($0)"].map { ($0[0], $0[1]) } }
         // Pull requests may land in an integration branch on the same server, which the default branch takes at a release.
-        if let base = bases.first, let remote = ["upstream", "origin"].first(where: { base.ref.hasPrefix("refs/remotes/\($0)/") }) {
-            bases = [base] + Self.integrationNames.compactMap { listed["refs/remotes/\(remote)/\($0)"].map { ($0[0], $0[1]) } }
+        if let first = bases.first, let remote = ["upstream", "origin"].first(where: { first.ref.hasPrefix("refs/remotes/\($0)/") }) {
+            // A server whose HEAD is develop, as git-flow sets it, still releases from main; develop stays a candidate.
+            let onLine = Self.integrationNames.contains { first.ref == "refs/remotes/\(remote)/\($0)" }
+            let release = onLine ? ["main", "master"].compactMap({ listed["refs/remotes/\(remote)/\($0)"].map { ($0[0], $0[1]) } }).first : nil
+            bases = [release ?? first] + Self.integrationNames.compactMap { listed["refs/remotes/\(remote)/\($0)"].map { ($0[0], $0[1]) } }
         } else {
             bases = Array(bases.prefix(1))
         }
