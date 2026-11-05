@@ -119,6 +119,7 @@ enum RepositoryInspectorIntegrationTests {
             ("commits name their branches and tags", CommitTopologyIntegrationTests.testCommitsNameTheirBranchesAndTags),
             ("repository history shows every branch and what is not on the server", CommitTopologyIntegrationTests.testRepositoryHistoryShowsEveryBranchAndWhatIsNotOnTheServer),
             ("branch history keeps what the server has below local work", CommitTopologyIntegrationTests.testBranchHistoryKeepsWhatTheServerHasBelowLocalWork),
+            ("the checked-out graph leaves other branches out", CommitTopologyIntegrationTests.testCheckedOutHistoryLeavesOtherBranchesOut),
             ("history reads further when asked for more", CommitTopologyIntegrationTests.testHistoryReadsFurtherWhenAskedForMore),
             ("reading never runs programs from repository config", GitSafetyIntegrationTests.testReadingNeverRunsProgramsFromRepositoryConfig),
             ("filters the user set up still apply", GitSafetyIntegrationTests.testFiltersTheUserSetUpStillApply),

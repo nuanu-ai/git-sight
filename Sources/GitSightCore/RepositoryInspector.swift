@@ -297,8 +297,9 @@ public struct RepositoryInspector {
         return commits
     }
 
-    /// Every branch, remote branch and tag, and linked worktrees on no branch, as one graph.
-    public func repositoryHistory(in repositoryURL: URL, limit: Int = historyPage) throws -> [CommitSnapshot] {
+    /// Every branch, remote branch and tag, and linked worktrees on no branch, as one graph. Without `everyBranch`,
+    /// only the branches checked out in worktrees, their copies on the server and `base`, as VS Code's graph shows a repository.
+    public func repositoryHistory(in repositoryURL: URL, everyBranch: Bool = true, base: String? = nil, limit: Int = historyPage) throws -> [CommitSnapshot] {
         // Linked worktrees on no branch hold commits no ref reaches, often an agent's.
         // The first entry is the main worktree, whose HEAD the history reads anyway, or a bare repository.
         // A worktree folder deleted or emptied by hand is skipped, as inspect skips it.

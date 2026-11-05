@@ -484,6 +484,53 @@ enum CommitTopologyIntegrationTests {
         try expectEqual(pruned.flatMap(\.refs).filter { $0.kind == .worktree }, [], "a deleted worktree gets no label")
     }
 
+    static func testCheckedOutHistoryLeavesOtherBranchesOut() throws {
+        let rootURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent(".build/GitSightTests/\(UUID().uuidString)", isDirectory: true)
+        let originURL = rootURL.appendingPathComponent("origin.git")
+        let repositoryURL = rootURL.appendingPathComponent("repository")
+        try FileManager.default.createDirectory(at: repositoryURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        try runGit(in: rootURL, ["init", "--bare", originURL.path])
+        try runGit(in: repositoryURL, ["init", "-b", "main"])
+        try runGit(in: repositoryURL, ["config", "user.name", "Test User"])
+        try runGit(in: repositoryURL, ["config", "user.email", "test@example.com"])
+        try runGit(in: repositoryURL, ["commit", "--allow-empty", "-m", "Main"])
+        try runGit(in: repositoryURL, ["remote", "add", "origin", originURL.path])
+        try runGit(in: repositoryURL, ["push", "-u", "origin", "main"])
+        // A production branch only on the server, and a local branch nobody has checked out.
+        try runGit(in: repositoryURL, ["checkout", "-b", "prod"])
+        try runGit(in: repositoryURL, ["commit", "--allow-empty", "-m", "Prod"])
+        try runGit(in: repositoryURL, ["push", "origin", "prod"])
+        try runGit(in: repositoryURL, ["checkout", "main"])
+        try runGit(in: repositoryURL, ["branch", "-D", "prod"])
+        try runGit(in: repositoryURL, ["checkout", "-b", "other"])
+        try runGit(in: repositoryURL, ["commit", "--allow-empty", "-m", "Other"])
+        // Another worktree on a branch of its own; from there the base moves on on the server.
+        let agentURL = rootURL.appendingPathComponent("agent")
+        try runGit(in: repositoryURL, ["worktree", "add", "-b", "agent", agentURL.path, "main"])
+        try runGit(in: agentURL, ["commit", "--allow-empty", "-m", "Main later"])
+        try runGit(in: agentURL, ["push", "origin", "HEAD:main"])
+        try runGit(in: agentURL, ["reset", "--hard", "HEAD~1"])
+        try runGit(in: agentURL, ["commit", "--allow-empty", "-m", "Agent"])
+        // The branch checked out here, whose copy on the server has a commit this Mac hasn't pulled.
+        try runGit(in: repositoryURL, ["checkout", "-b", "feature", "main"])
+        try runGit(in: repositoryURL, ["commit", "--allow-empty", "-m", "Feature"])
+        try runGit(in: repositoryURL, ["commit", "--allow-empty", "-m", "Pushed by a colleague"])
+        try runGit(in: repositoryURL, ["push", "-u", "origin", "feature"])
+        try runGit(in: repositoryURL, ["reset", "--hard", "HEAD~1"])
+
+        let history = try RepositoryInspector().repositoryHistory(in: repositoryURL, everyBranch: false, base: "refs/remotes/origin/main")
+        try expectEqual(
+            Set(history.map(\.subject)),
+            ["Main", "Main later", "Agent", "Feature", "Pushed by a colleague"],
+            "the branches checked out in worktrees, their copies on the server and the base are in the graph, other branches are not"
+        )
+    }
+
     static func testBranchHistoryKeepsWhatTheServerHasBelowLocalWork() throws {
         let rootURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
