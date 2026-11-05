@@ -303,7 +303,8 @@ public struct RepositoryInspector {
         // Linked worktrees on no branch hold commits no ref reaches, often an agent's.
         // The first entry is the main worktree, whose HEAD the history reads anyway, or a bare repository.
         // A worktree folder deleted or emptied by hand is skipped, as inspect skips it.
-        let detached = try worktreeEntries(in: repositoryURL).dropFirst().compactMap { entry in
+        let entries = try worktreeEntries(in: repositoryURL)
+        let detached = entries.dropFirst().compactMap { entry in
             entry.branch == nil && Self.isCheckedOut(entry.path)
                 ? entry.head.map { (name: entry.path.lastPathComponent, head: $0) } : nil
         }
@@ -313,8 +314,27 @@ public struct RepositoryInspector {
         // git log reads the stash list in a bare repository too, where git stash refuses; no stash prints nothing.
         let stashBases = try git.output(in: repositoryURL, ["log", "--walk-reflogs", "--ignore-missing", "--format=%P", "refs/stash", "--"])
             .split(separator: "\n").compactMap { $0.split(separator: " ").first.map(String.init) }
-        let tips = ["--branches"] + head + detached.map(\.head) + stashBases
-        var commits = try marked(history(in: repositoryURL, revisions: tips + ["--remotes", "--tags"], limit: limit), tips: tips, in: repositoryURL)
+        let tips: [String]
+        let others: [String]
+        if everyBranch {
+            tips = ["--branches"] + head + detached.map(\.head) + stashBases
+            others = ["--remotes", "--tags"]
+        } else {
+            // The main worktree's branch, or a bare repository's HEAD, and the branches linked worktrees have checked out.
+            let checkedOut = entries.enumerated().compactMap { index, entry in
+                index == 0 || Self.isCheckedOut(entry.path) ? entry.branch.map { "refs/heads/\($0)" } : nil
+            }
+            // for-each-ref lists only branches that exist: one started with --orphan has no commits yet.
+            let listed = checkedOut.isEmpty ? [] : try git.output(in: repositoryURL, ["for-each-ref", "--format=%(refname)%09%(upstream)"] + checkedOut)
+                .split(separator: "\n").map { $0.split(separator: "\t", omittingEmptySubsequences: false).map(String.init) }
+            let lines = listed.compactMap { $0.count > 1 && !$0[1].isEmpty ? $0[1] : nil } + (base.map { [$0] } ?? [])
+            // An upstream deleted on the server names nothing; git skips it rather than fail. A line on this Mac,
+            // a local base or upstream, is a tip too, so its commits the server lacks are marked.
+            tips = head + listed.map { $0[0] } + detached.map(\.head) + stashBases
+                + ["--ignore-missing"] + lines.filter { $0.hasPrefix("refs/heads/") }
+            others = lines.filter { !$0.hasPrefix("refs/heads/") }
+        }
+        var commits = try marked(history(in: repositoryURL, revisions: tips + others, limit: limit), tips: tips, in: repositoryURL)
         for (name, head) in detached {
             if let index = commits.firstIndex(where: { $0.fullHash == head }) {
                 commits[index].refs.append(CommitRef(kind: .worktree, name: name))

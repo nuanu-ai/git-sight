@@ -16,6 +16,7 @@ final class WorkspaceModel {
     private static let rootKey = "rootPath"
     /// The repository on screen when the app quit, opened again after the first scan.
     private static let openRepositoryKey = "openRepositoryPath"
+    private static let everyBranchKey = "graphShowsEveryBranch"
     /// Coming back to the app rescans only if the last result is older than this.
     private static let refreshInterval: TimeInterval = 60
     /// A window left open rescans this often, for new repositories and work that aged into a new verdict.
@@ -46,6 +47,16 @@ final class WorkspaceModel {
     private(set) var selectedPath: URL?
     /// The worktree or branch selected in the repository's list.
     private(set) var selectedPlaceID: String?
+
+    /// Whether the graph shows every branch, or only the branches checked out in worktrees, their copies on the
+    /// server and the base, as VS Code does. Off until the user turns it on in the View menu.
+    var showsEveryBranch = UserDefaults.standard.bool(forKey: WorkspaceModel.everyBranchKey) {
+        didSet {
+            UserDefaults.standard.set(showsEveryBranch, forKey: Self.everyBranchKey)
+            // A graph narrowed to one line stays as it is.
+            if scope == nil, selectedPath != nil { loadHistory(line: nil, limit: RepositoryInspector.historyPage) }
+        }
+    }
 
     /// Every branch of the selected repository, newest first, or the scope's history; nil while it loads.
     private(set) var history: [CommitSnapshot]?
@@ -470,9 +481,11 @@ final class WorkspaceModel {
                 + (repository.branches.contains { $0.name == repository.base } && line?.revision != "refs/heads/\(repository.base)"
                     ? ["refs/heads/\(repository.base)"] : [])
         } ?? []
+        let everyBranch = showsEveryBranch
+        let baseRef = selectedRepository?.baseRef
         let worker = Task.detached(priority: .userInitiated) { () throws -> ([CommitSnapshot], Set<String>) in
             let inspector = RepositoryInspector()
-            guard let line else { return (try inspector.repositoryHistory(in: path, limit: limit), []) }
+            guard let line else { return (try inspector.repositoryHistory(in: path, everyBranch: everyBranch, base: baseRef, limit: limit), []) }
             let own = try inspector.history(in: path, revisions: [line.revision] + base, limit: limit)
             return (try inspector.history(of: [line.revision], in: path, limit: limit), Set(own.filter { !$0.isBoundary }.map(\.fullHash)))
         }

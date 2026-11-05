@@ -517,7 +517,7 @@ private struct GraphPane: View {
         VStack(spacing: 0) {
             // With the graph, not before it: the title is only known once the read says which line it shows.
             if model.history != nil {
-                GraphLegend(scope: model.scope, showAllBranches: model.showAllBranches)
+                GraphLegend(scope: model.scope, everyBranch: model.showsEveryBranch, showAllBranches: model.showAllBranches)
                 Divider()
             }
             if let error = model.historyError {
@@ -742,11 +742,15 @@ private struct FactButton: View {
     }
 }
 
-/// What the marks in the graph mean, over it. When the pane narrows the marks wrap, and "All branches" goes first;
-/// a single branch's title stays, since it says why the graph shows less.
+/// What the marks in the graph mean, over it. When the pane narrows the marks wrap, and the title goes first;
+/// a single branch's title, or the checked-out branches', stays, since it says why the graph shows less.
 private struct GraphLegend: View {
     let scope: HistoryScope?
+    let everyBranch: Bool
     let showAllBranches: () -> Void
+
+    /// What the graph shows when it follows no single line.
+    private var whole: String { everyBranch ? "All branches" : "Checked-out branches" }
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
@@ -757,7 +761,7 @@ private struct GraphLegend: View {
                     .fixedSize()
             }
             VStack(alignment: .leading, spacing: 6) {
-                if scope != nil { title }
+                if scope != nil || !everyBranch { title }
                 marks
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -777,16 +781,21 @@ private struct GraphLegend: View {
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                    .help("This is older than the newest commits of all branches, so the graph shows its history alone.")
-                Button("All branches", action: showAllBranches)
+                    .help(everyBranch
+                          ? "This is older than the newest commits of all branches, so the graph shows its history alone."
+                          : "This is not in the graph of checked-out branches, so the graph shows its history alone.")
+                Button(whole, action: showAllBranches)
                     .buttonStyle(.link)
                     .foregroundStyle(.tint)
                     .fixedSize()
             }
         } else {
-            Text("All branches")
+            Text(whole)
                 .fontWeight(.semibold)
                 .foregroundStyle(.primary)
+                .help(everyBranch
+                      ? "Every branch, on this Mac and on the server. View > Only Checked-Out Branches shows less."
+                      : "Branches checked out in worktrees, their copies on the server and the base branch, as in VS Code. Turn off View > Only Checked-Out Branches to see every branch.")
         }
     }
 

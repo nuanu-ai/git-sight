@@ -529,6 +529,14 @@ enum CommitTopologyIntegrationTests {
             ["Main", "Main later", "Agent", "Feature", "Pushed by a colleague"],
             "the branches checked out in worktrees, their copies on the server and the base are in the graph, other branches are not"
         )
+
+        // A branch started with --orphan has no commits yet, and naming it would fail the log.
+        try runGit(in: repositoryURL, ["checkout", "--orphan", "pages"])
+        try expectEqual(
+            Set(try RepositoryInspector().repositoryHistory(in: repositoryURL, everyBranch: false, base: "refs/remotes/origin/main").map(\.subject)),
+            ["Main", "Main later", "Agent"],
+            "an unborn branch does not hide the other worktree and the base"
+        )
     }
 
     static func testBranchHistoryKeepsWhatTheServerHasBelowLocalWork() throws {

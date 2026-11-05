@@ -36,6 +36,11 @@ struct GitSightApp: App {
                     .disabled(model.rootURL == nil || model.isScanning)
             }
             TextSizeCommands()
+            CommandGroup(before: .toolbar) {
+                // Checked by default: the graph shows what VS Code shows. Unchecked, it shows every branch.
+                Toggle("Only Checked-Out Branches", isOn: Binding(get: { !model.showsEveryBranch }, set: { model.showsEveryBranch = !$0 }))
+                Divider()
+            }
         }
     }
 
