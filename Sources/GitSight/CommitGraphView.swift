@@ -174,6 +174,7 @@ struct RepositoryGraph: View {
                 .padding(.vertical, 4)
             }
             .opacity(waitsForFocus ? 0 : 1)
+            .modifier(KeepsHead(head: layout.rows.first?.id, proxy: proxy, focus: focus, waitsForFocus: waitsForFocus))
             .onChange(of: focus, initial: true) { _, target in scroll(to: target, in: layout, proxy: proxy) }
             .onChange(of: layout.rows.count) { _, _ in scroll(to: focus, in: layout, proxy: proxy) }
             // The diff pane takes the lower part; the clicked file scrolls back into view.
@@ -182,6 +183,37 @@ struct RepositoryGraph: View {
                 DispatchQueue.main.async {
                     withAnimation(.snappy(duration: 0.25)) { proxy.scrollTo("\(key(openRow))|\(path)") }
                 }
+            }
+        }
+    }
+
+    /// New commits arrive above the rows on screen, and the scroll view keeps those rows where they were.
+    /// A graph showing its head scrolls up to the new head, so new work is never hidden above;
+    /// one scrolled further down keeps its place.
+    private struct KeepsHead: ViewModifier {
+        struct Position: Equatable {
+            var offset: CGFloat
+            var height: CGFloat
+            var head: String?
+        }
+
+        let head: String?
+        let proxy: ScrollViewProxy
+        let focus: GraphRowID?
+        let waitsForFocus: Bool
+
+        func body(content: Content) -> some View {
+            if #available(macOS 15, *) {
+                content.onScrollGeometryChange(for: Position.self) { geometry in
+                    Position(offset: geometry.contentOffset.y + geometry.contentInsets.top, height: geometry.containerSize.height, head: head)
+                } action: { old, new in
+                    // A row to scroll to wins, and so does the first read.
+                    guard focus == nil, !waitsForFocus, let previous = old.head, let head = new.head, head != previous,
+                          old.offset < old.height / 2 else { return }
+                    proxy.scrollTo(head, anchor: .top)
+                }
+            } else {
+                content
             }
         }
     }
