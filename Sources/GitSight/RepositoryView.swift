@@ -527,6 +527,7 @@ private struct GraphPane: View {
                     commits: commits,
                     extras: extras,
                     folders: folders,
+                    baseRef: repository.baseRef,
                     highlighted: highlighted(in: commits),
                     openRow: model.openRow,
                     files: model.rowFiles,
