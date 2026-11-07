@@ -30,7 +30,7 @@ Repositories are sorted by weight: size × age × risk. Size is files for uncomm
 ## One screen for all of it
 
 - **Overview.** A row per repository and a bubble per kind of work, sized by how much there is and colored by its verdict. Click a bubble to open that work.
-- **Worktrees and branches.** Each repository lists its worktrees, then branches not checked out anywhere, then stashes whose branch is gone. Every chip jumps to its spot in the graph.
+- **Worktrees and branches.** Each repository lists its worktrees, then branches without a worktree, then stashes whose branch is gone. Every chip jumps to its spot in the graph.
 - **The graph.** All branches, remote branches, tags and worktrees, drawn the way VS Code draws it. Uncommitted files and stashes get rows of their own above the commit they sit on. Commits the server lacks sit on an orange band.
 - **Live.** An FSEvents watcher rereads only the repository that changed. Edits, commits and stashes show up within a second, and repositories touched in the last 15 minutes move up under "Live now".
 - **Files and diffs.** Click a row in the graph and its files open under it. Click a file and its diff opens below.

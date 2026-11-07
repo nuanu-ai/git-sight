@@ -53,7 +53,7 @@ private struct PlaceList: View {
     @AppStorage("showsLeftovers") private var showsLeftovers = false
     @FocusState private var isFocused: Bool
 
-    /// Branches not checked out, by what is wrong with them.
+    /// Branches without a worktree, by what is wrong with them.
     private enum Group: CaseIterable {
         case local, unmerged, leftover
     }
@@ -72,7 +72,7 @@ private struct PlaceList: View {
                         }
                     }
                     if !sections.branches.isEmpty {
-                        section("Branches not checked out", systemImage: "arrow.triangle.branch", count: sections.branches.count) {
+                        section("Branches without a worktree", systemImage: "arrow.triangle.branch", count: sections.branches.count) {
                             ForEach(Group.allCases, id: \.self) { group in
                                 subgroup(group, places: sections.branches.filter { self.group(of: $0) == group }, now: now)
                             }
