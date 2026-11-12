@@ -151,6 +151,7 @@ enum RepositoryInspectorIntegrationTests {
             ("latest change follows the newest work", RecentChangeIntegrationTests.testLatestChangeFollowsTheNewestWork),
             ("watcher ignores files git ignores", RepositoryWatcherIntegrationTests.testIgnoredFilesAreNotChanges),
             ("watcher reports a repository in the temporary folder", RepositoryWatcherIntegrationTests.testReportsARepositoryInTheTemporaryFolder),
+            ("a dropped watcher stops reporting", RepositoryWatcherIntegrationTests.testDroppedWatcherStopsReporting),
             ("stashes know their branch and commit", WorkPlaceIntegrationTests.testStashesKnowTheirBranchAndCommit),
             ("work is listed where it sits", WorkPlaceIntegrationTests.testWorkIsListedWhereItSits),
             ("weight and lead say how bad it is", WorkPlaceIntegrationTests.testWeightAndLeadSayHowBadItIs)

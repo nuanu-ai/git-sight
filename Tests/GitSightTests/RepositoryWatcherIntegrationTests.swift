@@ -91,6 +91,47 @@ enum RepositoryWatcherIntegrationTests {
         withExtendedLifetime(watcher) {}
     }
 
+    static func testDroppedWatcherStopsReporting() async throws {
+        let rootURL = makeRoot()
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        let repositoryURL = try makeRepository(at: rootURL.appendingPathComponent("repository"))
+        let repository = try RepositoryInspector().inspect(repositoryAt: repositoryURL)
+        let changes = ChangeLog()
+        let entered = DispatchSemaphore(value: 0)
+        let gate = DispatchSemaphore(value: 0)
+        // Stands for the app's model: what the report closure holds must go once the watcher does.
+        var model: ChangeLog? = ChangeLog()
+        weak let heldModel = model
+        var watcher: RepositoryWatcher? = RepositoryWatcher(repositories: [repository]) { [model] paths in
+            model?.add(paths)
+            if changes.paths.isEmpty {
+                changes.add(paths)
+                entered.signal()
+                gate.wait()
+            } else {
+                changes.add(paths)
+            }
+        }
+        model = nil
+        try await Task.sleep(for: .milliseconds(500))
+
+        // The app drops its watcher after every scan, sometimes while a report is still running.
+        try "edit\n".write(to: repositoryURL.appendingPathComponent("tracked.txt"), atomically: true, encoding: .utf8)
+        guard entered.wait(timeout: .now() + 5) == .success else {
+            throw TestFailure(description: "the watcher never reported the edit")
+        }
+        watcher = nil
+        gate.signal()
+        withExtendedLifetime(watcher) {}
+        try await Task.sleep(for: .milliseconds(300))
+        changes.clear()
+
+        try "later edit\n".write(to: repositoryURL.appendingPathComponent("tracked.txt"), atomically: true, encoding: .utf8)
+        try await Task.sleep(for: .seconds(1))
+        try expectEqual(changes.paths, [], "a dropped watcher reports nothing more")
+        try expectEqual(heldModel == nil, true, "a dropped watcher lets go of what its report closure held")
+    }
+
     private static func makeRoot() -> URL {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
