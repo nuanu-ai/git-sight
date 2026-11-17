@@ -29,11 +29,15 @@ otool -l "$BIN" | sed -n 's/^ *path \(.*\) (offset [0-9]*)$/\1/p' | while IFS= r
 done
 install_name_tool -add_rpath @executable_path/../Frameworks "$BIN"
 
-# Ad-hoc sign from the inside out, so every nested piece of Sparkle matches the app.
-codesign --force --sign - "$SPARKLE/Versions/B/XPCServices/Installer.xpc"
-codesign --force --sign - --preserve-metadata=entitlements "$SPARKLE/Versions/B/XPCServices/Downloader.xpc"
-codesign --force --sign - "$SPARKLE/Versions/B/Autoupdate"
-codesign --force --sign - "$SPARKLE/Versions/B/Updater.app"
-codesign --force --sign - "$SPARKLE"
-codesign --force --sign - "$APP"
+# Sign from the inside out, so every nested piece of Sparkle matches the app. Without
+# SIGN_IDENTITY the signature is ad hoc, which is enough to run the app on this Mac.
+# A Developer ID signature needs the hardened runtime and a timestamp to pass notarization.
+IDENTITY=${SIGN_IDENTITY:--}
+if [ "$IDENTITY" = - ]; then RUNTIME=; else RUNTIME="--options runtime --timestamp"; fi
+codesign --force --sign "$IDENTITY" $RUNTIME "$SPARKLE/Versions/B/XPCServices/Installer.xpc"
+codesign --force --sign "$IDENTITY" $RUNTIME --preserve-metadata=entitlements "$SPARKLE/Versions/B/XPCServices/Downloader.xpc"
+codesign --force --sign "$IDENTITY" $RUNTIME "$SPARKLE/Versions/B/Autoupdate"
+codesign --force --sign "$IDENTITY" $RUNTIME "$SPARKLE/Versions/B/Updater.app"
+codesign --force --sign "$IDENTITY" $RUNTIME "$SPARKLE"
+codesign --force --sign "$IDENTITY" $RUNTIME "$APP"
 codesign --verify --deep --strict "$APP"

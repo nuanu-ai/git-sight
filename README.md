@@ -72,9 +72,15 @@ For each release:
 sh Scripts/release.sh 1.3
 ```
 
-The script sets the version, builds and signs `Artifacts/GitSight-1.3.zip`, adds it to `appcast.xml`, and prints the commands that publish it. It publishes nothing itself. Upload the zip before pushing `main`, so the appcast never points at a file that isn't there yet.
+The script sets the version, builds the app, signs it with the Developer ID certificate in the keychain, has Apple notarize it and staples the ticket, then signs `Artifacts/GitSight-1.3.zip` for Sparkle, adds it to `appcast.xml`, and prints the commands that publish it. It publishes nothing itself. Upload the zip before pushing `main`, so the appcast never points at a file that isn't there yet.
 
-The app is signed ad hoc, without a Developer ID, so after the first download macOS blocks it until you allow it under System Settings → Privacy & Security → Open Anyway. Updates that Sparkle installs shouldn't need it again.
+Notarization reads its credentials from a keychain profile, made once:
+
+```sh
+xcrun notarytool store-credentials git-sight --apple-id <your Apple ID> --team-id 9TGK2Y68S6
+```
+
+`SIGN_IDENTITY` and `NOTARY_PROFILE` point the script at another certificate or profile. `sh Scripts/package_app.sh` on its own signs ad hoc, which is enough to run the app on the Mac that built it.
 
 ## License
 

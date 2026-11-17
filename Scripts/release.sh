@@ -37,6 +37,15 @@ if ! command -v op >/dev/null; then
 fi
 KEY=$(op read "$KEY_REF") || { echo "Couldn't read the signing key from $KEY_REF" >&2; exit 1; }
 
+# The Developer ID certificate's key stays in this Mac's keychain. The notary profile is made once with
+# `xcrun notarytool store-credentials git-sight --apple-id <id> --team-id 9TGK2Y68S6`.
+export SIGN_IDENTITY=${SIGN_IDENTITY:-Developer ID Application: Dmitry Ukhanov (9TGK2Y68S6)}
+NOTARY_PROFILE=${NOTARY_PROFILE:-git-sight}
+if ! security find-identity -v -p codesigning | grep -qF "\"$SIGN_IDENTITY\""; then
+    echo "No valid \"$SIGN_IDENTITY\" certificate in the keychain." >&2
+    exit 1
+fi
+
 # Sparkle compares CFBundleVersion, so it has to grow with every release.
 BUILD=$(git rev-list --count HEAD)
 LAST=$(sed -n 's|.*<sparkle:version>\(.*\)</sparkle:version>.*|\1|p' appcast.xml | head -n 1)
@@ -54,6 +63,13 @@ set_plist CFBundleVersion "$BUILD"
 sh Scripts/package_app.sh
 
 ZIP=Artifacts/GitSight-$VERSION.zip
+rm -f "$ZIP"
+# Apple checks the signed app and issues a ticket. Stapling it into the app lets Gatekeeper open
+# the first download without asking Apple. A rejected app has no ticket, so stapler stops the release.
+ditto -c -k --keepParent Artifacts/GitSight.app "$ZIP"
+xcrun notarytool submit "$ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
+xcrun stapler staple Artifacts/GitSight.app
+spctl --assess --type execute Artifacts/GitSight.app
 rm -f "$ZIP"
 ditto -c -k --sequesterRsrc --keepParent Artifacts/GitSight.app "$ZIP"
 
